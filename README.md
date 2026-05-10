@@ -11,6 +11,21 @@ Automated shift scheduling system for IDF Miluim (reserve duty) units. Built for
 - **Syncs to Google Calendar** — color-coded events per person
 - **Daily email reports** — formatted HTML with today's assignments
 
+## Dashboard
+
+The scheduler maintains a **dashboard** sheet with live visual summary:
+
+| Section | Content |
+|---------|---------|
+| **Status Cards** | Total shifts filled, fill %, days remaining |
+| **Leaderboard** | Ranked list of all personnel with morning/night/total counts + bar chart |
+| **Team Leaderboards** | Per-team breakdowns (Team 1, Team 2) |
+| **Charts** | Column chart (morning vs night per person), Pie chart (overall distribution) |
+| **Today's Shifts** | Who's on duty right now (both teams, both shifts) |
+| **QA Log** | Recent verification results |
+
+The dashboard updates automatically after each scheduling run and draft check.
+
 ## Features
 
 | Feature | Description |
@@ -32,6 +47,7 @@ Automated shift scheduling system for IDF Miluim (reserve duty) units. Built for
 
 ### Pass 1 — Initial Schedule
 Greedy week-by-week solver fills all shifts respecting constraints, fairness, and scheduling rules.
+- **Unfillable shifts**: If no one is available, the cell is painted **red** and skipped — the scheduler continues without stopping.
 
 ### Pass 2 — QA Verification
 Automated checks after scheduling:

@@ -22,7 +22,8 @@ Automatic shift scheduling for reserve duty units. Two-pass scheduling engine wi
 ### Two-Pass Scheduling
 
 **Pass 1 — Initial Schedule**
-Greedy week-by-week solver fills all shifts. Respects:
+Greedy week-by-week solver fills all shifts. If a shift cannot be filled (no one available due to constraints): **paint the cell red** and **continue** — never stop the scheduler.
+Respects:
 - Per-person constraints (available, shift-1-only, shift-2-only, unavailable)
 - No same person on both shifts of the same day
 - No consecutive shift-2→next-shift-1
@@ -197,7 +198,7 @@ Re-running QA verification...
 
 | Command | Description |
 |---------|-------------|
-| `miluim:fill` | Run two-pass scheduling on the draft sheet |
+| `miluim:fill` | Two-pass scheduling: fill shifts + QA. Unfillable shifts painted red and skipped. Updates dashboard. |
 | `miluim:verify` | Run QA verification only (no changes) |
 | `miluim:copy-to-prod` | Copy draft → production |
 | `miluim:sync` | Sync production sheet → Google Calendar |
