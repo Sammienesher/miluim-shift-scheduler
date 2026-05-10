@@ -84,6 +84,18 @@ When QA finds violations:
 
 Both sheets must have identical structure (rows, columns, layout).
 
+### Auto-Publish vs Admin Approval
+
+Configure `auto_copy_to_prod` in the rules sheet:
+
+**Auto-Publish (`true`):**
+After QA passes → auto-copy draft → `✅ Published to production`
+If QA fails after `max_iterations` → `⚠️ Manual review needed`
+
+**Wait for Approval (`false` — default):**
+After QA passes → notify admin → admin runs `hermes miluim:copy-to-prod`
+Admin can review draft before publishing.
+
 ## Configuration Sheet
 
 All settings in the `rules` sheet (3rd sheet in the template):

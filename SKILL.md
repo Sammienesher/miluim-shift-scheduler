@@ -103,11 +103,29 @@ All settings in the `rules` sheet:
 ### Workflow
 | Setting | Description |
 |---------|-------------|
-| `workflow_mode` | `draft_first` (default) or `prod_direct` or `manual` |
+| `workflow_mode` | `draft_first` (default) schedule in draft then copy to prod / `prod_direct` write directly to prod / `manual` no auto-scheduling |
 | `auto_verify_draft` | Check draft for changes 2x/day (default: true) |
 | `draft_check_times` | Comma-separated check times (default: 09:00,15:00) |
-| `auto_copy_to_prod` | Auto-copy to prod after verification (default: false) |
+| `auto_copy_to_prod` | `true` = auto-publish to prod after QA passes / `false` (default) = notify admin and wait for approval |
 | `max_iterations` | Max scheduling iterations before alert (default: 3) |
+
+### Auto-Publish vs Admin Approval
+
+Configured via `auto_copy_to_prod` in the rules sheet:
+
+**Auto-Publish (`auto_copy_to_prod: true`):**
+1. Run `hermes miluim:fill` → two-pass scheduling
+2. QA passes → auto-copy draft to prod
+3. Notify admin: "✅ Published to production"
+4. QA fails → auto-fix and retry (up to max_iterations)
+5. All iterations fail → alert admin: "⚠️ Manual review needed"
+
+**Wait for Approval (`auto_copy_to_prod: false` — default):**
+1. Run `hermes miluim:fill` → two-pass scheduling
+2. QA passes → notify admin: "✅ Scheduling complete, waiting for approval"
+3. Admin reviews, then runs `hermes miluim:copy-to-prod`
+4. QA fails → same auto-fix/retry behavior
+5. Admin can also manually edit draft and re-run verification
 
 ### Notifications
 | Setting | Description |
