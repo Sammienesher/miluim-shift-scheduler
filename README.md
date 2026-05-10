@@ -4,125 +4,155 @@ Automated shift scheduling system for IDF Miluim (reserve duty) units. Built for
 
 ## What It Does
 
-- **Generates fair shift schedules** — automatically assigns morning/night shifts across a pool of officers, respecting individual constraints and distribution rules
-- **Syncs to Google Calendar** — creates events per officer per shift, color-coded by person
-- **Sends daily email reports** — emails shift assignments and constraints to commanders each morning
-- **Reads rules from the spreadsheet** — no hardcoded logic; all rules come from a dedicated "rules" sheet
+- **Two-pass scheduling engine** — fills shifts + runs automated QA verification
+- **Draft ↔ Production workflow** — schedule in draft, verify, then copy to prod
+- **Multi-channel notifications** — Telegram, Email, WhatsApp
+- **Auto change detection** — checks draft for manual edits twice daily
+- **Syncs to Google Calendar** — color-coded events per person
+- **Daily email reports** — formatted HTML with today's assignments
 
 ## Features
 
 | Feature | Description |
 |---------|-------------|
-| **Constraint-aware scheduling** | Respects "can do morning only", "can do night only", "unavailable", and "unknown" constraints per person per day |
-| **Fair distribution** | Balances shift loads evenly across the available pool |
-| **Rule enforcement** | No same person on morning + night of same day; no consecutive night→next-morning; weekend separation (Fri/Sat) |
-| **Soft constraint: consecutive limit** | Limits how many consecutive night shifts one person can get (default: max 2) |
-| **Weekly auto-scheduling** | Solves each 7-day block independently for clean boundaries |
-| **Google Calendar sync** | Pushes schedule to a shared calendar; each officer gets their own events, color-coded per person |
-| **Daily report email** | Sends a beautifully formatted HTML email every morning with today's assignments |
-| **Self-destruct on end date** | Cron jobs auto-disable when the duty period ends |
-| **Rules-driven** | All scheduling rules, shift times, and team config are read from the spreadsheet — no code changes needed |
+| **Constraint-aware scheduling** | Respects constraints per person per day |
+| **Fair distribution** | Balances shift loads evenly |
+| **Two-pass verification** | Schedule + QA pass catches violations |
+| **Auto-fix** | Re-schedules when QA finds issues |
+| **Draft/Prod workflow** | Test in draft, deploy to production |
+| **Multi-channel notifications** | Telegram, email, WhatsApp on success/failure |
+| **Change detection** | 2x daily check for manual draft edits |
+| **Google Calendar sync** | Color-coded events per officer |
+| **Daily report** | HTML email with today's assignments |
+| **Rules-driven** | All config in the `rules` sheet |
+| **Self-destruct** | Cron jobs auto-disable on end date |
+
+## Two-Pass Scheduling
+
+### Pass 1 — Initial Schedule
+Greedy week-by-week solver fills all shifts respecting constraints, fairness, and scheduling rules.
+
+### Pass 2 — QA Verification
+Automated checks after scheduling:
+- ✅ No same person on both shifts of the same day
+- ✅ No consecutive night→next-morning
+- ✅ Consecutive night limit (default: max 2)
+- ✅ Fairness variance (gap between most/least assigned)
+- ✅ Weekend separation (same person Fri+Sat)
+- ✅ All slots assigned
+- ✅ Unavailable people not assigned
+- ✅ Constraints honored
+
+**On success**: Sends notification to configured channels.
+**On failure**: Auto-fix and retry (up to `max_iterations`). After max: alert admin with detailed report.
+
+### Auto-Fix
+When QA finds violations:
+1. Identify problematic days
+2. Re-solve those weeks with tighter constraints
+3. Re-run QA
+4. Repeat up to `max_iterations` times
+
+## Draft → Production Workflow
+
+```
+                   ┌─────────────┐
+                   │   DRAFT     │
+                   └──────┬──────┘
+                          │
+              ┌───────────▼───────────┐
+              │  Two-Pass Scheduler   │
+              │  1. Fill shifts       │
+              │  2. QA verification   │
+              └───────────┬───────────┘
+                          │
+              ┌───────────▼───────────┐
+              │  QA Passed?           │
+              │  Yes → Notify ✅      │
+              │  No  → Fix & Retry 🔄 │
+              └───────────┬───────────┘
+                          │
+              ┌───────────▼───────────┐
+              │  Copy to Production   │
+              └───────────┬───────────┘
+                          │
+                   ┌──────┴──────┐
+                   │ PRODUCTION │
+                   │  (live)    │
+                   └─────────────┘
+```
+
+Both sheets must have identical structure (rows, columns, layout).
+
+## Configuration Sheet
+
+All settings in the `rules` sheet (3rd sheet in the template):
+
+### Sections
+
+| Section | Settings | Description |
+|---------|----------|-------------|
+| Basic Scheduling | `shifts_per_day`, `shift_1_name`, `people_per_shift_X` | Core shift config |
+| Departments | `num_departments`, `department_X_name`, `department_X_rows` | Team structure |
+| Dates | `date_start`, `date_end` | Scheduling period |
+| Sheets | `draft_sheet_id`, `prod_sheet_id` | Google Sheets IDs |
+| Rules | `consecutive_night_limit`, `rule_no_same_day` | Scheduling rules |
+| Workflow | `workflow_mode`, `auto_verify_draft`, `draft_check_times` | Workflow config |
+| Notifications | `notify_channel_X`, `telegram_chat_id`, `email_recipients` | Alert destinations |
+| Advanced | `calendar_name`, `report_send_time`, `sync_time` | Misc settings |
+
+## Notifications
+
+### Channels
+- **Telegram** — sends to configured chat ID
+- **Email** — sends to comma-separated recipients
+- **WhatsApp** — sends via configured integration
+
+### Events
+- ✅ Scheduling success (after QA passes)
+- ⚠️ Scheduling failure (after max retries)
+- 📋 Draft change detected (manual edit)
+- 📊 Daily shift report
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `hermes miluim:fill` | Run two-pass scheduling on draft |
+| `hermes miluim:verify` | Run QA verification only |
+| `hermes miluim:copy-to-prod` | Copy draft → production sheet |
+| `hermes miluim:sync` | Sync production → Google Calendar |
+| `hermes miluim:setup` | Setup all cron jobs |
+| `hermes miluim:status` | Show scheduling status and stats |
+| `hermes miluim:check-draft` | Manually trigger draft change check |
+
+## Cron Jobs
+
+| Job | Schedule | Description | Self-Destruct |
+|-----|----------|-------------|---------------|
+| `sync-miluim-shifts` | 06:30 daily | Sync prod → Calendar | On end date |
+| `miluim-daily-report` | 07:00 daily | Email today's shifts | On end date |
+| `miluim-draft-check` | 09:00, 15:00 | Check draft for edits | On end date |
 
 ## Quick Start
 
-### 1. Install the Skill in Hermes
-
 ```bash
+# 1. Install
 hermes skill install miluim-shift-scheduler
+
+# 2. Create templates (draft + prod)
+cp template/shifts_template.xlsx unit_draft.xlsx
+cp template/shifts_template.xlsx unit_prod.xlsx
+
+# 3. Upload both to Google Sheets
+
+# 4. Configure rules sheet with sheet IDs, dates, notifications
+
+# 5. Schedule!
+hermes miluim:fill           # Two-pass scheduling with QA
+hermes miluim:copy-to-prod   # Deploy to production
+hermes miluim:setup          # Enable cron jobs
 ```
-
-### 2. Set Up Your Spreadsheet
-
-Copy the template:
-
-```bash
-cp template/shifts_template.xlsx my_unit_schedule.xlsx
-```
-
-Upload to Google Sheets. Fill in your data.
-
-### 3. Configure
-
-Update the "rules" sheet with your preferences:
-- Shift times (default: 06:00–18:00 / 18:00–06:00)
-- Email recipients for daily reports
-- Date range for the duty period
-- Consecutive night limit
-
-### 4. Run the Scheduler
-
-```bash
-# Load the skill
-hermes skill load miluim-shift-scheduler
-
-# Run: fill shifts and sync
-hermes miluim:sync
-```
-
-## Spreadsheet Structure
-
-The template has 3 sheets:
-
-### 1. `משמרות` (Shifts)
-The main assignment table. Organized in weekly blocks (7 days + summary column). Two teams per sheet:
-- **Evaluation team** (הערכה) — rows 3-5 (header, morning, night)
-- **Analysis team** (עיבוד) — rows 7-10 (header, header, morning, night)
-- **Constraints section** — below the shifts, lists each person's availability per day
-
-### 2. `rules`  
-Scheduling rules and configuration. The skill reads this sheet to determine:
-- `max_consecutive_nights` — maximum consecutive night shifts per person (default: 2)
-- `shift_times_morning` — morning shift hours (default: "06:00-18:00")
-- `shift_times_night` — night shift hours (default: "18:00-06:00")
-- `email_recipients` — comma-separated list of daily report recipients
-- `date_start` / `date_end` — the scheduling period
-- `team_evaluation_name` / `team_analysis_name` — display names
-- `rule_no_same_day` — enable/disable same-day check
-- `rule_no_consecutive_night_morning` — enable/disable rule 2
-- `rule_weekend_separation` — enable/disable weekend rule
-
-### 3. `instructions`
-Usage guide and legend for the spreadsheet.
-
-## Scheduling Rules (Hard)
-
-These rules are always enforced:
-
-1. **No same person on both shifts of the same day** — a person cannot work morning AND night
-2. **No consecutive night→morning** — if someone works night shift, they cannot work the next morning
-3. **Respect constraints** — "לא יכול" (unavailable), "יכול רק בוקר" (morning only), "יכול רק לילה" (night only) are honored
-4. **No unknown people assigned** — "לא ידוע" (unknown) is treated as unavailable
-
-## Scheduling Rules (Soft)
-
-Configured in the `rules` sheet:
-
-- **Consecutive night limit** — default max 2 nights in a row for the same person
-- **Weekend separation** — avoid same person on consecutive Fri/Sat (optional)
-- **Fair distribution** — solver balances total shift counts per person
-
-## Daily Report
-
-The cron job `miluim-daily-report` sends an HTML email every morning at 07:00 with:
-- Today's date
-- All shifts for today (morning + night, both teams)
-- Who's on leave / unavailable today
-- Quick stats
-
-## Calendar Sync
-
-The cron job `sync-miluim-shifts` runs daily at 06:30 and:
-- Reads the latest assignments from the spreadsheet
-- Creates/updates Google Calendar events
-- Color-codes by person (up to 9 distinct colors)
-- Never deletes existing events (additive only)
-
-## Dependencies
-
-- Hermes Agent with Google Workspace integration (`gws` CLI)
-- Google Sheets API enabled
-- Gmail API enabled (for email reports)
-- Google Calendar API enabled (for calendar sync)
 
 ## License
 

@@ -1,161 +1,192 @@
 ---
 name: miluim-shift-scheduler
-description: Automated shift scheduling for IDF Miluim (reserve duty) units. Generates fair schedules respecting constraints, syncs to Google Calendar, and sends daily email reports.
+description: Automated shift scheduling for IDF Miluim (reserve duty) units. Two-pass scheduling with QA verification, draft/prod workflow, auto-notification via Telegram/Email/WhatsApp.
 license: MIT
 ---
 
 # Miluim Shift Scheduler
 
-Automatic shift scheduling for reserve duty units. Manages morning/night shifts, respects individual constraints, and pushes everything to Google Calendar.
+Automatic shift scheduling for reserve duty units. Two-pass scheduling engine with QA verification, draft→production workflow, and multi-channel notifications.
 
-## When to Use
+## Workflow
 
-- Setting up a new shift schedule for a miluim rotation
-- Generating fair assignments across a pool of officers
-- Syncing schedules to a shared Google Calendar
-- Setting up daily email reports for commanders
+### Two-Pass Scheduling
 
-## Setup
+**Pass 1 — Initial Schedule**
+Greedy week-by-week solver fills all shifts for the configured date range. Respects:
+- Per-person constraints (available, morning-only, night-only, unavailable)
+- No same person on both shifts of the same day
+- No consecutive night→next-morning
+- Fair distribution across available pool
+- Consecutive night limit (default: max 2)
 
-### 1. Create Your Spreadsheet
+**Pass 2 — QA Verification**
+After initial scheduling, runs automated checks:
+- ✅ Same-day violations (same person both shifts)
+- ✅ Rule 2 violations (night→next morning)
+- ✅ Consecutive night limit exceeded
+- ✅ Fairness variance (gap between most/least assigned)
+- ✅ Weekend separation (same person Fri+Sat)
+- ✅ All slots assigned
+- ✅ Unavailable people not assigned
 
-Copy the template included with this skill:
+If violations found: auto-fix and re-run (up to `max_iterations`). On success: notify admin. On failure: alert with detailed report.
 
-```bash
-cp skills/miluim-shift-scheduler/template/shifts_template.xlsx my_unit.xlsx
+### Draft → Production Workflow
+
+```
+                          ┌─────────────┐
+                          │   DRAFT     │
+                          │  (editable) │
+                          └──────┬──────┘
+                                 │
+                    ┌────────────▼──────────┐
+                    │  Two-Pass Scheduler   │
+                    │  1. Fill              │
+                    │  2. Verify            │
+                    └────────────┬──────────┘
+                                 │
+                    ┌────────────▼──────────┐
+                    │  QA Passed?            │
+                    │  Yes → Notify Admin    │
+                    │  No  → Fix & Retry     │
+                    └────────────┬──────────┘
+                                 │
+                    ┌────────────▼──────────┐
+                    │  Admin: Copy to Prod   │
+                    └────────────┬──────────┘
+                                 │
+                          ┌──────┴──────┐
+                          │ PRODUCTION  │
+                          │  (live)     │
+                          └─────────────┘
 ```
 
-Upload to Google Sheets and fill in:
-- **Team names** in cells B1 and A7 (or use your own layout)
-- **People names** in the constraints section
-- **Constraints** per person per day (יכול / לא יכול / יכול רק בוקר / יכול רק לילה / לא ידוע)
-- **Rules** in the `rules` sheet
+Both sheets must have **identical structure** — same rows, columns, and layout. The `rules` sheet configures which rows map to which departments.
 
-### 2. Configure the Sheet ID
+### Auto Change Detection
 
-```bash
-# Store the sheet ID
-hermes config set miluim_sheet_id "your-spreadsheet-id-here"
-```
+If `auto_verify_draft = true`, a cron job checks the draft sheet for manual changes twice a day (default: 09:00, 15:00). If changes detected:
+1. Re-run QA verification
+2. If violations found: alert admin
+3. Notify admin about the change
 
-The sheet ID is the long string in the URL: `https://docs.google.com/spreadsheets/d/THIS_IS_THE_ID/edit`
+## Configuration
 
-### 3. Run the Scheduler
+All settings in the `rules` sheet:
 
-```bash
-# Fill the schedule
-hermes miluim:fill
+### Basic Scheduling
+| Setting | Description |
+|---------|-------------|
+| `shifts_per_day` | Number of shifts per day (default: 2) |
+| `shift_1_name` | Name of first shift (default: בוקר) |
+| `shift_2_name` | Name of second shift (default: לילה) |
+| `people_per_shift_1` | People needed per shift 1 per day (default: 1) |
+| `people_per_shift_2` | People needed per shift 2 per day (default: 1) |
 
-# Sync to calendar
-hermes miluim:sync
+### Departments
+| Setting | Description |
+|---------|-------------|
+| `num_departments` | Number of departments (e.g., 2: הערכה, עיבוד) |
+| `department_X_name` | Display name for department X |
+| `department_X_morning_row` | Sheet row for department X, shift 1 |
+| `department_X_night_row` | Sheet row for department X, shift 2 |
 
-# Set up daily reports
-hermes miluim:setup-reports
-```
+### Sheets
+| Setting | Description |
+|---------|-------------|
+| `draft_sheet_id` | Google Sheets ID of the DRAFT spreadsheet |
+| `prod_sheet_id` | Google Sheets ID of the PRODUCTION spreadsheet |
+| `draft_tab_name` | Tab name for shifts in draft (default: משמרות) |
+| `constraint_start_row` | First row of constraint data (default: 27) |
 
-## Spreadsheet Layout
+### Workflow
+| Setting | Description |
+|---------|-------------|
+| `workflow_mode` | `draft_first` (default) or `prod_direct` or `manual` |
+| `auto_verify_draft` | Check draft for changes 2x/day (default: true) |
+| `draft_check_times` | Comma-separated check times (default: 09:00,15:00) |
+| `auto_copy_to_prod` | Auto-copy to prod after verification (default: false) |
+| `max_iterations` | Max scheduling iterations before alert (default: 3) |
 
-The template has these columns:
-- **Column A**: Labels (person names, shift labels)
-- **Columns B onward**: Days, grouped in 7-day weeks + 1 summary column
-- **Constraints section**: Below the shift assignments, each row = one person with per-day availability
-
-### Team Structure
-
-By default, the template supports two teams:
-- **Team 1** (הערכה/Evaluation): rows 3-5
-- **Team 2** (עיבוד/Analysis): rows 8-10
-
-### Constraint Values
-
-| Value | Meaning |
-|-------|---------|
-| `יכול` | Available for any shift |
-| `לא יכול` | Not available |
-| `יכול רק בוקר` | Morning only |
-| `יכול רק לילה` | Night only |
-| `לא ידוע` | Unknown — treated as unavailable |
-
-## Scheduling Rules
-
-### Hard Rules (always enforced):
-
-1. **No same person on both shifts of the same day**
-2. **No consecutive night→morning** — night-shift worker can't work next morning
-3. **Constraints are respected** — unavailable people are never assigned
-4. **No guessing** — "לא ידוע" = unavailable
-
-### Soft Rules (configured in `rules` sheet):
-
-- **Consecutive night limit** — max nights in a row for same person (default: 2)
-- **Fair distribution** — balances total shift loads
+### Notifications
+| Setting | Description |
+|---------|-------------|
+| `notify_channel_1` | Primary notification channel (telegram/email/whatsapp) |
+| `notify_channel_2` | Secondary notification channel |
+| `telegram_chat_id` | Telegram chat ID for notifications |
+| `email_recipients` | Comma-separated email recipients |
+| `notify_on_success` | Send notification when scheduling succeeds |
+| `notify_on_failure` | Send notification when scheduling fails |
+| `notify_on_draft_change` | Alert when draft sheet is modified |
 
 ## Commands
 
-### `hermes miluim:fill`
-
-Reads the current spreadsheet, solves the schedule from today forward, and writes assignments back. Respects existing data for past dates.
-
-### `hermes miluim:sync`
-
-Reads the latest assignments from the spreadsheet and syncs them to a Google Calendar named "משמרות מילואים". Creates one event per officer per shift. Events are color-coded per person.
-
-### `hermes miluim:setup-reports`
-
-Creates two cron jobs:
-- `sync-miluim-shifts` — runs daily at 06:30, syncs sheet → calendar
-- `miluim-daily-report` — runs daily at 07:00, emails HTML report to configured recipients
-
-Both self-destruct on the configured end date.
-
-## Email Reports
-
-Daily reports are HTML-formatted and include:
-- Today's date
-- Morning shift assignments (both teams)
-- Night shift assignments (both teams)
-- Who's unavailable today
-- Running shift counts per person
-- Quick stats
-
-## Calendar Events
-
-Each event in the Google Calendar is formatted as:
-```
-[Name] - Shift [Morning/Night] - [Team Name]
-```
-Example: `עומר נשר - משמרת בוקר - הערכה`
-
-Events span the full shift period (default: 06:00-18:00 or 18:00-06:00).
+| Command | Description |
+|---------|-------------|
+| `hermes miluim:fill` | Run two-pass scheduling on the draft sheet |
+| `hermes miluim:verify` | Run QA verification only (no changes) |
+| `hermes miluim:copy-to-prod` | Copy draft → production |
+| `hermes miluim:sync` | Sync production sheet → Google Calendar |
+| `hermes miluim:setup` | Setup all cron jobs (sync, report, draft check) |
+| `hermes miluim:status` | Show current scheduling status and stats |
+| `hermes miluim:check-draft` | Manually trigger draft change check |
 
 ## Cron Jobs
 
-### Sync Job (06:30 daily)
-```
-python3 sync_miluim_shifts.py
-```
-- Reads sheet → computes current assignments
-- Updates calendar events (adds/changes only, never deletes)
-- Self-destructs on end date
+| Job | Schedule | Description |
+|-----|----------|-------------|
+| `sync-miluim-shifts` | 06:30 daily | Sync prod → Google Calendar |
+| `miluim-daily-report` | 07:00 daily | Send email report with today's shifts |
+| `miluim-draft-check` | 09:00, 15:00 | Check draft for manual changes + re-verify |
 
-### Report Job (07:00 daily)
+All jobs self-destruct on the configured end date.
+
+## Notification Messages
+
+### Success (after QA passes)
 ```
-python3 daily_report.py
+✅ Scheduling Complete — [unit name]
+Two-pass verification passed.
+Days scheduled: [X]
+Shifts filled: [X]
+Violations found: 0
+Shift breakdown by person: [summary]
+Next step: run 'copy draft to prod'
 ```
-- Generates HTML report
-- Emails to configured recipients
-- Self-destructs on end date
 
-## Troubleshooting
+### Failure (QA fails after max iterations)
+```
+⚠️ Scheduling Alert — [unit name]
+QA failed after [N] iterations.
+Issues found: [list of violations]
+Manual review required.
+```
 
-### "No data found in range"
-Check the sheet tab name and range. The skill expects a tab named "משמרות" or use the configured name.
+### Draft Change Detected
+```
+📋 Draft Change Detected — [unit name]
+The draft sheet was modified manually.
+Re-running QA verification...
+[results]
+```
 
-### "Calendar sync failed"
-Ensure the calendar exists with the right name. Create it manually first:
+## Quick Start
+
 ```bash
-gws calendar insert --summary "משמרות מילואים"
-```
+# Install the skill
+hermes skill install miluim-shift-scheduler
 
-### "Email not sending"
-Check that gmail API is enabled and the sender email has access.
+# Copy the template (create 2 copies: draft + prod)
+cp template/shifts_template.xlsx my_unit_draft.xlsx
+cp template/shifts_template.xlsx my_unit_prod.xlsx
+
+# Upload both to Google Sheets
+
+# Configure the rules sheet with your sheet IDs and settings
+# Then:
+hermes miluim:fill        # Two-pass scheduling
+hermes miluim:verify      # QA check
+hermes miluim:copy-to-prod  # Push to production
+hermes miluim:setup       # Enable cron jobs
+```
