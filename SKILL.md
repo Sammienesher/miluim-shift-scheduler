@@ -71,11 +71,11 @@ If violations found: auto-fix and re-run (up to `max_iterations`). On success: n
                           └─────────────┘
 ```
 
-Both sheets must have **identical structure** — same rows, columns, and layout. The `rules` sheet configures which rows map to which departments.
+Both sheets must have **identical structure** — same rows, columns, and layout. The `settings` sheet configures which rows map to which departments.
 
 ### Auto-Publish vs Admin Approval
 
-Configured via `auto_copy_to_prod` in the rules sheet:
+Configured via `auto_copy_to_prod` in the settings sheet:
 
 **Auto-Publish (`auto_copy_to_prod: true`):**
 1. Run `miluim:fill` → two-pass scheduling
@@ -100,7 +100,7 @@ If `auto_verify_draft = true`, a cron job checks the draft sheet for manual chan
 
 ## Configuration
 
-All settings in the `rules` sheet:
+All settings in the `settings` sheet:
 
 ### Basic Scheduling
 | Setting | Description |
@@ -242,7 +242,7 @@ cp template/shifts_template.xlsx unit_prod.xlsx
 
 # 2. Upload to Google Sheets
 
-# 3. Configure rules sheet: sheet IDs, dates, notifications
+# 3. Configure settings sheet: sheet IDs, dates, notifications
 
 # 4. Run (varies by framework):
 #    hermes miluim:fill

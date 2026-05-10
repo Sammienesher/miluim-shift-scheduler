@@ -24,7 +24,7 @@ Automated shift scheduling system for IDF Miluim (reserve duty) units. Built for
 | **Change detection** | 2x daily check for manual draft edits |
 | **Google Calendar sync** | Color-coded events per officer |
 | **Daily report** | HTML email with today's assignments |
-| **Rules-driven** | All config in the `rules` sheet |
+| **Rules-driven** | All config in the `settings` sheet |
 | **Self-destruct** | Cron jobs auto-disable on end date |
 | **Framework-agnostic** | Works with Claude Code, Hermes Agent, OpenClaw, etc. |
 
@@ -87,7 +87,7 @@ Both sheets must have identical structure (rows, columns, layout).
 
 ### Auto-Publish vs Admin Approval
 
-Configure `auto_copy_to_prod` in the rules sheet:
+Configure `auto_copy_to_prod` in the settings sheet:
 
 **Auto-Publish (`true`):**
 After QA passes → auto-copy draft → `✅ Published to production`
@@ -99,7 +99,7 @@ Admin can review draft before publishing.
 
 ## Configuration Sheet
 
-All settings in the `rules` sheet (3rd sheet in the template):
+All settings in the `settings` sheet (3rd sheet in the template):
 
 ### Sections
 
@@ -124,8 +124,8 @@ The main assignment table. Organized in weekly blocks (7 days + summary column).
 - **Team 2** — rows 7-10 (header, header, shift 1, shift 2)
 - **Constraints section** — below the shifts, lists each person's availability per day
 
-### 2. `rules`  
-Scheduling rules and configuration. The AI agent reads this sheet to determine all settings.
+### 2. `settings`  
+Scheduling settings and configuration. The AI agent reads this sheet to determine all settings.
 
 ### 3. `instructions`
 Usage guide and legend for the spreadsheet.
@@ -141,7 +141,7 @@ These rules are always enforced:
 
 ## Scheduling Rules (Soft)
 
-Configured in the `rules` sheet:
+Configured in the `settings` sheet:
 
 - **Consecutive shift 2 limit** — default max 2 consecutive shifts for the same person
 - **Weekend separation** — avoid same person on consecutive Fri/Sat (optional)
@@ -228,7 +228,7 @@ cp template/shifts_template.xlsx unit_prod.xlsx
 
 # 2. Upload both to Google Sheets
 
-# 3. Configure the rules sheet with:
+# 3. Configure the settings sheet with:
 #    - Sheet IDs for draft and prod
 #    - Date range
 #    - Notification channels
