@@ -26,6 +26,8 @@ The scheduler maintains a **dashboard** sheet with live visual summary:
 
 The dashboard updates automatically after each scheduling run and draft check.
 
+The **Team column** (צוות) in the main leaderboard is populated dynamically via `COUNTIF` formulas matching each name against the `groups` sheet — if group names change or members are reassigned, the column updates automatically.
+
 ## Features
 
 | Feature | Description |

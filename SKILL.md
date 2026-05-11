@@ -166,6 +166,14 @@ All settings in the `settings` sheet:
 | `notify_on_failure` | Send notification when scheduling fails |
 | `notify_on_draft_change` | Alert when draft sheet is modified |
 
+### Groups Sheet
+
+The spreadsheet includes a **`groups`** sheet (separate from `settings`) as the source of truth for group membership:
+- **Column A**: Group 1 name (header) + members below
+- **Column B**: Group 2 name (header) + members below
+
+Constraint names in the scheduling sheet and dashboard team sections are **formula-linked** to this sheet — adding/removing a member auto-updates everything. The **team column** (צוות) in the dashboard leaderboard uses `COUNTIF` to dynamically match each person to their group.
+
 ## Notification Messages
 
 ### Success (after QA passes)
