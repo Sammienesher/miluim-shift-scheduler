@@ -122,7 +122,7 @@ All settings in the `settings` sheet (3rd sheet in the template):
 | Section | Settings | Description |
 |---------|----------|-------------|
 | Basic Scheduling | `shifts_per_day`, `shift_1_name`, `people_per_shift_X` | Core shift config |
-| Departments | `num_departments`, `department_X_name`, `department_X_rows` | Team structure |
+| Groups | `num_groups`, `group_X_name`, `group_X_rows` | Team structure (names auto-populated from `groups` sheet) |
 | Dates | `date_start`, `date_end` | Scheduling period |
 | Sheets | `draft_sheet_id`, `prod_sheet_id` | Google Sheets IDs |
 | Rules | `consecutive_night_limit`, `rule_no_same_day` | Scheduling rules |
@@ -132,19 +132,22 @@ All settings in the `settings` sheet (3rd sheet in the template):
 
 ## Spreadsheet Structure
 
-The template has 3 sheets:
+The spreadsheet has 4 sheets:
 
 ### 1. `משמרות` (Shifts)
 The main assignment table. Organized in weekly blocks (7 days + summary column). Two teams per sheet:
 - **Team 1** — rows 3-5 (header, shift 1, shift 2)
 - **Team 2** — rows 7-10 (header, header, shift 1, shift 2)
-- **Constraints section** — below the shifts, lists each person's availability per day
+- **Constraints section** — below the shifts (row 13+), lists each person's availability per day. The person names in this section are **formula-linked** to the `groups` sheet — adding/removing members there auto-updates the constraint list.
 
-### 2. `settings`  
-Scheduling settings and configuration. The AI agent reads this sheet to determine all settings.
+### 2. `groups`
+Source of truth for group membership. Column A = group 1 (header `=groups!A1` + members), Column B = group 2 (header `=groups!B1` + members). Adding or removing a person here auto-updates the constraint names, the settings sheet group names, and the dashboard team sections.
 
-### 3. `instructions`
-Usage guide and legend for the spreadsheet.
+### 3. `settings`  
+Scheduling settings and configuration. Group name settings (`group_1_name`, `group_2_name`) are auto-populated from the `groups` sheet via formulas.
+
+### 4. `dashboard`
+Read-only dashboard with live stats, leaderboards (team sections linked to `groups` sheet), and charts. Auto-updated after each scheduling run.
 
 ## Scheduling Rules (Hard)
 

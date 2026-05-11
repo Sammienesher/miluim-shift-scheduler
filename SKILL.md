@@ -112,16 +112,16 @@ All settings in the `settings` sheet:
 | `people_per_shift_1` | People needed per shift 1 per day (default: 1) |
 | `people_per_shift_2` | People needed per shift 2 per day (default: 1) |
 
-### Departments
+### Groups
 | Setting | Description |
 |---------|-------------|
-| `num_departments` | Number of departments (default: 2) |
-| `department_1_name` | Display name for department 1 |
-| `department_1_shift1_row` | Sheet row for department 1, shift 1 |
-| `department_1_shift2_row` | Sheet row for department 1, shift 2 |
-| `department_2_name` | Display name for department 2 |
-| `department_2_shift1_row` | Sheet row for department 2, shift 1 |
-| `department_2_shift2_row` | Sheet row for department 2, shift 2 |
+| `num_groups` | Number of groups (default: 2) |
+| `group_1_name` | Group 1 display name — auto-populated from `groups` sheet (`=groups!A1`) |
+| `group_1_shift1_row` | Sheet row for group 1, shift 1 |
+| `group_1_shift2_row` | Sheet row for group 1, shift 2 |
+| `group_2_name` | Group 2 display name — auto-populated from `groups` sheet (`=groups!B1`) |
+| `group_2_shift1_row` | Sheet row for group 2, shift 1 |
+| `group_2_shift2_row` | Sheet row for group 2, shift 2 |
 
 ### Dates
 | Setting | Description |
@@ -243,16 +243,19 @@ cp template/shifts_template.xlsx unit_prod.xlsx
 
 # 2. Upload to Google Sheets
 
-# 3. Configure settings sheet: sheet IDs, dates, notifications
+# 3. Create a `groups` sheet with group headers (A1, B1) and member names below
 
-# 4. Run (varies by framework):
+# 4. Configure settings sheet: sheet IDs, dates, notifications
+#    Group names auto-populate from the groups sheet
+
+# 5. Run (varies by framework):
 #    hermes miluim:fill
 #    claude "schedule miluim shifts"
 #    miluim:fill
 
-# 5. Deploy: miluim:copy-to-prod
+# 6. Deploy: miluim:copy-to-prod
 
-# 6. Enable automation: miluim:setup
+# 7. Enable automation: miluim:setup
 ```
 
 ## Dependencies
