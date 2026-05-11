@@ -172,7 +172,7 @@ The spreadsheet includes a **`groups`** sheet (separate from `settings`) as the 
 - **Column A**: Group 1 name (header) + members below
 - **Column B**: Group 2 name (header) + members below
 
-Constraint names in the scheduling sheet and dashboard team sections are **formula-linked** to this sheet — adding/removing a member auto-updates everything. The **team column** (צוות) in the dashboard leaderboard uses `COUNTIF` to dynamically match each person to their group.
+Constraint names in the scheduling sheet and dashboard team sections are **formula-linked** to this sheet — adding/removing a member auto-updates everything. The **team column** (צוות) in the dashboard leaderboard uses `COUNTIF` to dynamically match each person to their group. Section headers (A24, A33) also pull group names dynamically from `groups!A$1` / `groups!B$1`.
 
 ## Notification Messages
 
