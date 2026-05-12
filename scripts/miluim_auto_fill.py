@@ -205,10 +205,11 @@ def solve_week(week, people_data, running_counts, team_name="eval"):
         
         candidates = [p for p in avail_m[col] 
                       if p != prev_night_person  # Rule 2
-                      and p not in mornings.values()]  # can't double same morning
+                      and p not in mornings.values()  # can't double same morning
+                      and p != nights.get(col)]  # BUG FIX: can't double same-day night
         
         if not candidates:
-            candidates = [p for p in avail_m[col] if p != prev_night_person]
+            candidates = [p for p in avail_m[col] if p != prev_night_person and p != nights.get(col)]
         if not candidates:
             candidates = avail_m[col]
         
@@ -252,13 +253,37 @@ def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_n
             if em: existing_m[col] = em
             if en: existing_n[col] = en
         
-        if has_existing:
-            # Week already filled - just count existing
+        # Check if week is FULLY filled (every day has both shifts)
+        all_filled = all(
+            col in existing_m and col in existing_n 
+            for col in week["days"]
+        )
+        
+        if all_filled:
+            # Week fully filled - just count existing
             for p in existing_m.values():
                 running[p] += 1
             for p in existing_n.values():
                 running[p] += 1
             print(f"  {team_name} week {w_idx+1} ({week['start_date']}-{week['end_date']}): already filled, skipped")
+        elif has_existing:
+            # BUG FIX: Partially filled week - preserve existing, fill gaps
+            for p in existing_m.values():
+                running[p] += 1
+            for p in existing_n.values():
+                running[p] += 1
+            m, n = solve_week(week, people_data, running, team_name)
+            
+            for col in week["days"]:
+                if col not in existing_m and col in m:
+                    all_updates[(row_morning, col)] = m[col]
+                if col not in existing_n and col in n:
+                    all_updates[(row_night, col)] = n[col]
+            
+            existing_count = len(existing_m) + len(existing_n)
+            filled_now = len([c for c in week["days"] if c not in existing_m and c in m]) + \
+                         len([c for c in week["days"] if c not in existing_n and c in n])
+            print(f"  {team_name} week {w_idx+1} ({week['start_date']}-{week['end_date']}): {existing_count} existing + {filled_now} new = {len(week['days'])*2} total")
         else:
             # Solve this week
             m, n = solve_week(week, people_data, running, team_name)
@@ -277,6 +302,63 @@ eval_updates = fill_section(eval_people, existing_morning, existing_night, 4, 5,
 print(f"\nEvaluation: {len(eval_updates)} cells to update")
 anal_updates = fill_section(anal_people, existing_anal_m, existing_anal_n, 9, 10, "anal")
 print(f"Analysis: {len(anal_updates)} cells to update")
+
+# === QA VERIFICATION ===
+def verify_schedule(updates, people_data, existing_m_row, existing_n_row, team_name, row_m, row_n):
+    """Check for violations in the solved schedule."""
+    issues = []
+    
+    # Build full picture: existing + new updates
+    m_by_col = {}
+    n_by_col = {}
+    for col in date_cols:
+        em = get_existing(existing_m_row, col)
+        if em: m_by_col[col] = em
+        en = get_existing(existing_n_row, col)
+        if en: n_by_col[col] = en
+    
+    for (row, col), val in updates.items():
+        if row == row_m:
+            m_by_col[col] = val
+        elif row == row_n:
+            n_by_col[col] = val
+    
+    for col in date_cols:
+        if col in m_by_col and col in n_by_col:
+            # Bug 1 check: same-day double booking
+            m_person = m_by_col[col]
+            n_person = n_by_col[col]
+            if norm(m_person) == norm(n_person):
+                date_str = col_to_date.get(col, f"col {col}")
+                issues.append(f"  ⚠ {date_str}: {m_person} assigned BOTH morning AND night")
+        
+        # Rule 2 check: night[d-1] -> morning[d]
+        prev_idx = date_cols.index(col) - 1 if col in date_cols else -1
+        if prev_idx >= 0:
+            prev_col = date_cols[prev_idx]
+            if prev_col in n_by_col and col in m_by_col:
+                prev_n = n_by_col[prev_col]
+                curr_m = m_by_col[col]
+                if norm(prev_n) == norm(curr_m):
+                    date_str = col_to_date.get(col, f"col {col}")
+                    issues.append(f"  ⚠ {date_str}: {prev_n} on night[{prev_col}] -> morning[{col}] (Rule 2)")
+    
+    if not issues:
+        print(f"  ✅ {team_name} QA: clean ({len(updates)} cells)")
+    else:
+        print(f"  ❌ {team_name} QA: {len(issues)} issue(s):")
+        for issue in issues:
+            print(issue)
+    return issues
+
+eval_issues = verify_schedule(eval_updates, eval_people, existing_morning, existing_night, "Evaluation", 4, 5)
+anal_issues = verify_schedule(anal_updates, anal_people, existing_anal_m, existing_anal_n, "Analysis", 9, 10)
+
+total_issues = len(eval_issues) + len(anal_issues)
+if total_issues > 0:
+    print(f"\n⚠️  TOTAL QA ISSUES: {total_issues}")
+else:
+    print(f"\n✅ QA: ALL CLEAR (0 issues)")
 
 # === WRITE TO SHEET ===
 # Group updates by row for batch writing
