@@ -43,6 +43,18 @@ for ci, cell in enumerate(anal_header):
 # Structure: partial week (Wed-Sat, 4 cols), then full weeks (Sun-Sat, 7 cols each)
 date_cols = sorted(col_to_date.keys())
 
+# Filter out past dates — only schedule from today forward
+TODAY = datetime.now().strftime("%d/%m/%y")
+def is_past(col):
+    d = col_to_date.get(col, "")
+    if not d: return True
+    # Compare DD/MM/YY strings lexicographically works if MM and DD are zero-padded
+    return d < TODAY
+
+past_count = sum(1 for c in date_cols if is_past(c))
+date_cols = [c for c in date_cols if not is_past(c)]
+print(f"Skipped {past_count} past columns, {len(date_cols)} future columns remain")
+
 # Helper to get day of week for a date
 def get_dow_for_date(date_str):
     parts = date_str.split("/")
