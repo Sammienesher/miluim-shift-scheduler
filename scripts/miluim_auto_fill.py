@@ -3,13 +3,18 @@
 Auto-fill all missing shift assignments in the draft sheet.
 Reads constraints, generates fair schedules, writes results.
 """
-import subprocess, json, re, sys, math
-from datetime import datetime
+import subprocess, json, re, sys, math, argparse
+from datetime import datetime, date
 from collections import defaultdict, Counter
 
 SHEET_ID = "1GlT_Qu4Fi3gl0qSMp798mg0wKEEG1_-iSNrVjQkV8wI"
 TAB = "משמרות הערכה ועיבוד - טיוטא"
 CONSECUTIVE_NIGHT_LIMIT = 2  # max consecutive nights before penalty kicks in
+
+_ap = argparse.ArgumentParser()
+_ap.add_argument("--max-days", type=int, default=0)
+args = _ap.parse_args()
+MAX_DAYS = args.max_days
 
 def gws(*args):
     r = subprocess.run(["gws"]+list(args), capture_output=True, text=True, timeout=60)
@@ -57,9 +62,27 @@ def is_past(col):
     if not d: return True
     return date_sort_key(d) < TODAY_KEY
 
+def date_diff(d):
+    """Days from today to date d (DD/MM/YY). Positive = future."""
+    parts = d.split('/')
+    dt = datetime(2000+int(parts[2]), int(parts[1]), int(parts[0]))
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    return (dt - today).days
+
+def is_beyond_cutoff(col):
+    if MAX_DAYS <= 0: return False
+    d = col_to_date.get(col, "")
+    if not d: return False
+    return date_diff(d) > MAX_DAYS
+
 past_count = sum(1 for c in date_cols if is_past(c))
 date_cols = [c for c in date_cols if not is_past(c)]
 print(f"Skipped {past_count} past columns, {len(date_cols)} future columns remain")
+
+if MAX_DAYS > 0:
+    beyond_count = sum(1 for c in date_cols if is_beyond_cutoff(c))
+    date_cols = [c for c in date_cols if not is_beyond_cutoff(c)]
+    print(f"Skipped {beyond_count} beyond-cutoff columns (--max-days={MAX_DAYS}), {len(date_cols)} columns remain")
 
 # Helper to get day of week for a date
 def get_dow_for_date(date_str):
