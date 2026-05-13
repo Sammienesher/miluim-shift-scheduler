@@ -9,6 +9,7 @@ from collections import defaultdict, Counter
 
 SHEET_ID = "1GlT_Qu4Fi3gl0qSMp798mg0wKEEG1_-iSNrVjQkV8wI"
 TAB = "משמרות הערכה ועיבוד - טיוטא"
+CONSECUTIVE_NIGHT_LIMIT = 2  # max consecutive nights before penalty kicks in
 
 def gws(*args):
     r = subprocess.run(["gws"]+list(args), capture_output=True, text=True, timeout=60)
@@ -153,7 +154,7 @@ def is_weekend(col):
     day = get_day(col)
     return day in (4, 5)  # Fri=4, Sat=5
 
-def solve_week(week, people_data, running_counts, team_name="eval"):
+def solve_week(week, people_data, running_counts, team_name="eval", prev_week_nights=None):
     """Solve a single week's assignments. Returns (mornings, nights) dicts."""
     days = week["days"]
     mornings = {}
@@ -166,7 +167,22 @@ def solve_week(week, people_data, running_counts, team_name="eval"):
     for col in days:
         avail_m[col] = [p for p in people_data if check_constraint(p, col, "morning", people_data)]
         avail_n[col] = [p for p in people_data if check_constraint(p, col, "night", people_data)]
-    
+
+    # Initialize consecutive night counts from end of previous week
+    consecutive_counts = defaultdict(int)
+    if prev_week_nights:
+        sorted_prev = sorted(prev_week_nights.keys())
+        if sorted_prev:
+            last_person = prev_week_nights.get(sorted_prev[-1])
+            if last_person:
+                count = 0
+                for d in reversed(sorted_prev):
+                    if prev_week_nights.get(d) == last_person:
+                        count += 1
+                    else:
+                        break
+                consecutive_counts[last_person] = count
+
     # For evaluation team, strip existing counts for fairness calculation
     # Running counts are from previous weeks
     
@@ -175,33 +191,37 @@ def solve_week(week, people_data, running_counts, team_name="eval"):
     
     # Night assignment first (since it affects next morning)
     # Sort nights by availability (fewest options first)
-    night_order = sorted(days, key=lambda c: len(avail_n[c]))
-    
-    for col in night_order:
-        candidates = [p for p in avail_n[col] 
+    # Night assignment in calendar order so consecutive counts are accurate
+    for col in days:
+        candidates = [p for p in avail_n[col]
                       if p not in nights.values()]  # can't do double same night
         if not candidates:
             candidates = avail_n[col]
-        
-        # Prefer people with lower running counts, but also consider:
-        # If someone did this morning, they CAN do this night (Rule 2 is night→next MORNING)
-        # If someone is doing night, they can't do next morning
-        
-        # Score candidates
-        def score(p):
+
+        def score(p, _col=col):
             base = running_counts.get(p, 0)
-            # Penalize slightly if already assigned this night
             night_penalty = 5 if p in nights.values() else 0
-            # Bonus for night-only people on night shifts
-            is_night_only = all(check_constraint(p, c, "morning", people_data) == False 
+            is_night_only = all(check_constraint(p, c, "morning", people_data) == False
                               for c in days)
             night_bonus = -3 if is_night_only else 0
-            return base + night_penalty + night_bonus
-        
+            consec = consecutive_counts.get(p, 0)
+            if consec >= CONSECUTIVE_NIGHT_LIMIT + 1:
+                consec_penalty = 100
+            elif consec >= CONSECUTIVE_NIGHT_LIMIT:
+                consec_penalty = 20
+            else:
+                consec_penalty = 0
+            return base + night_penalty + night_bonus + consec_penalty
+
         candidates.sort(key=score)
         best = candidates[0]
         nights[col] = best
         running_counts[best] = running_counts.get(best, 0) + 1
+        # Update consecutive counts: increment winner, reset everyone else
+        consecutive_counts[best] = consecutive_counts.get(best, 0) + 1
+        for p in people_data:
+            if p != best:
+                consecutive_counts[p] = 0
     
     # Morning assignment
     # Can't assign someone who did PREVIOUS night
@@ -248,7 +268,8 @@ def solve_week(week, people_data, running_counts, team_name="eval"):
 def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_night, team_name):
     """Fill all weeks for a section (evaluation or analysis)."""
     running = defaultdict(int)
-    
+    prev_week_nights = None
+
     # Count existing shifts from already-filled weeks
     all_updates = {}  # {(row, col): value}
     
@@ -277,6 +298,7 @@ def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_n
                 running[p] += 1
             for p in existing_n.values():
                 running[p] += 1
+            prev_week_nights = existing_n
             print(f"  {team_name} week {w_idx+1} ({week['start_date']}-{week['end_date']}): already filled, skipped")
         elif has_existing:
             # BUG FIX: Partially filled week - preserve existing, fill gaps
@@ -284,28 +306,30 @@ def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_n
                 running[p] += 1
             for p in existing_n.values():
                 running[p] += 1
-            m, n = solve_week(week, people_data, running, team_name)
-            
+            m, n = solve_week(week, people_data, running, team_name, prev_week_nights)
+            prev_week_nights = {**existing_n, **n}
+
             for col in week["days"]:
                 if col not in existing_m and col in m:
                     all_updates[(row_morning, col)] = m[col]
                 if col not in existing_n and col in n:
                     all_updates[(row_night, col)] = n[col]
-            
+
             existing_count = len(existing_m) + len(existing_n)
             filled_now = len([c for c in week["days"] if c not in existing_m and c in m]) + \
                          len([c for c in week["days"] if c not in existing_n and c in n])
             print(f"  {team_name} week {w_idx+1} ({week['start_date']}-{week['end_date']}): {existing_count} existing + {filled_now} new = {len(week['days'])*2} total")
         else:
             # Solve this week
-            m, n = solve_week(week, people_data, running, team_name)
-            
+            m, n = solve_week(week, people_data, running, team_name, prev_week_nights)
+            prev_week_nights = n
+
             for col in week["days"]:
                 if col not in existing_m and col in m:
                     all_updates[(row_morning, col)] = m[col]
                 if col not in existing_n and col in n:
                     all_updates[(row_night, col)] = n[col]
-            
+
             print(f"  {team_name} week {w_idx+1} ({week['start_date']}-{week['end_date']}): assigned")
     
     return all_updates
