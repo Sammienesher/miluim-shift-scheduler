@@ -45,12 +45,17 @@ for ci, cell in enumerate(anal_header):
 date_cols = sorted(col_to_date.keys())
 
 # Filter out past dates — only schedule from today forward
-TODAY = datetime.now().strftime("%d/%m/%y")
+def date_sort_key(d):
+    """Convert DD/MM/YY to YYMMDD for proper chronological comparison"""
+    parts = d.split('/')
+    return parts[2] + parts[1] + parts[0]
+
+TODAY_KEY = date_sort_key(datetime.now().strftime("%d/%m/%y"))
+
 def is_past(col):
     d = col_to_date.get(col, "")
     if not d: return True
-    # Compare DD/MM/YY strings lexicographically works if MM and DD are zero-padded
-    return d < TODAY
+    return date_sort_key(d) < TODAY_KEY
 
 past_count = sum(1 for c in date_cols if is_past(c))
 date_cols = [c for c in date_cols if not is_past(c)]
@@ -62,17 +67,37 @@ def get_dow_for_date(date_str):
     dt = datetime(2000+int(parts[2]), int(parts[1]), int(parts[0]))
     return dt.weekday()  # Mon=0, Sun=6
 
-# Find first Sunday (start of first full week)
+# Build week blocks: initial partial week (Wed/Thu/Fri/Sat before first Sunday)
+# then full Sun-Sat weeks.
 weeks = []
 i = 0
+
+# Phase 1: collect any dates before the first Sunday as a partial week
+partial_days = []
 while i < len(date_cols):
     col = date_cols[i]
-    date_str = col_to_date[col]
-    dow = get_dow_for_date(date_str)
-    
-    if dow == 6:  # Sunday found (Python weekday 6)
+    dow = get_dow_for_date(col_to_date[col])
+    if dow == 6:  # Sunday — end of partial, start of full weeks
+        break
+    partial_days.append(col)
+    i += 1
+
+if partial_days:
+    weeks.append({
+        "days": partial_days,
+        "start_date": col_to_date[partial_days[0]],
+        "end_date": col_to_date[partial_days[-1]]
+    })
+    print(f"Partial initial week: {col_to_date[partial_days[0]]} – {col_to_date[partial_days[-1]]} ({len(partial_days)} days)")
+
+# Phase 2: full Sun-Sat weeks
+while i < len(date_cols):
+    col = date_cols[i]
+    dow = get_dow_for_date(col_to_date[col])
+    if dow == 6:  # Sunday found
         week = date_cols[i:i+7]
-        if len(week) < 7: break
+        if len(week) < 7:
+            break
         weeks.append({
             "days": week,
             "start_date": col_to_date[week[0]],
@@ -80,11 +105,11 @@ while i < len(date_cols):
         })
         i += 7
     else:
-        i += 1  # skip partial week and gaps
+        i += 1  # gap between weeks (shouldn't normally happen)
 
-print(f"Found {len(weeks)} full week blocks from {weeks[0]['start_date']} to {weeks[-1]['end_date']}")
-
-print(f"Found {len(weeks)} week blocks from {weeks[0]['start_date']} to {weeks[-1]['end_date'] if weeks else 'N/A'}")
+if not weeks:
+    print("No week blocks found"); sys.exit(1)
+print(f"Found {len(weeks)} week block(s) from {weeks[0]['start_date']} to {weeks[-1]['end_date']}")
 
 # === PARSE CONSTRAINTS ===
 # Evaluation: rows 16-19 (vals[15]-vals[18])
@@ -213,6 +238,9 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
                 consec_penalty = 0
             return base + night_penalty + night_bonus + consec_penalty
 
+        if not candidates:
+            print(f"  ⚠ No night candidates for {col_to_date.get(col, col)}, skipping")
+            continue
         candidates.sort(key=score)
         best = candidates[0]
         nights[col] = best
@@ -257,6 +285,9 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
                         weekend_penalty += 3
             return base + dup + weekend_penalty
         
+        if not candidates:
+            print(f"  ⚠ No morning candidates for {col_to_date.get(col, col)}, skipping")
+            continue
         candidates.sort(key=score_m)
         best = candidates[0]
         mornings[col] = best
@@ -402,57 +433,38 @@ def write_updates(updates, section_name):
     if not updates:
         print(f"{section_name}: No updates needed")
         return
-    
-    # Group by row
+
+    def col_letter(ci):
+        if ci < 26: return chr(65 + ci)
+        a = ci // 26 - 1
+        b = ci % 26
+        return chr(65 + a) + chr(65 + b)
+
+    # Group by row for logging, then write one cell at a time.
+    # Date columns are non-contiguous (summary cols between them), so range-batching
+    # would misalign values; individual writes are always correct.
     by_row = defaultdict(dict)
     for (row, col), val in updates.items():
         by_row[row][col] = val
-    
+
+    total_ok = total_fail = 0
     for row, cols in sorted(by_row.items()):
         sorted_cols = sorted(cols.keys())
-        print(f"  Row {row}: writing {len(sorted_cols)} cells at cols {sorted_cols[0]}-{sorted_cols[-1]}")
-        # Find contiguous ranges
-        ranges = []
-        start = sorted_cols[0]
-        end = start
-        for c in sorted_cols[1:]:
-            if c == end + 1:
-                end = c
-            else:
-                ranges.append((start, end))
-                start = c
-                end = c
-        ranges.append((start, end))
-        
-        for start_col, end_col in ranges:
-            # Build A1 range
-            def col_letter(ci):
-                if ci < 26: return chr(65 + ci)
-                a = ci // 26 - 1
-                b = ci % 26
-                return chr(65 + a) + chr(65 + b)
-            
-            rng = f"{col_letter(start_col)}{row}:{col_letter(end_col)}{row}"
-            values = [[cols[c] for c in range(start_col, end_col+1) if c in cols]]
-            
-            full_range = f"'{TAB}'!{rng}"
+        print(f"  Row {row}: {len(sorted_cols)} cell(s) → {[col_letter(c)+str(row) for c in sorted_cols]}")
+        for col in sorted_cols:
+            cell = f"{col_letter(col)}{row}"
+            full_range = f"'{TAB}'!{cell}"
             result = gws("sheets","spreadsheets","values","update",
                 "--params", json.dumps({"spreadsheetId": SHEET_ID, "range": full_range, "valueInputOption": "USER_ENTERED"}),
-                "--json", json.dumps({"values": values}),
+                "--json", json.dumps({"values": [[cols[col]]]}),
                 "--format","json")
             if result:
-                print(f"  ✓ {rng} ({len(values[0])} cells)")
+                print(f"    ✓ {cell} = {cols[col]}")
+                total_ok += 1
             else:
-                # Try without the tab quotes
-                result2 = subprocess.run(
-                    ["gws","sheets","spreadsheets.values","update",
-                     "--params", json.dumps({"spreadsheetId": SHEET_ID, "range": f"'{TAB}'!{rng}", "valueInputOption": "USER_ENTERED"}),
-                     "--json", json.dumps({"values": values}),
-                     "--format","json"],
-                    capture_output=True, text=True, timeout=30
-                )
-                stderr = result2.stderr[:200]
-                print(f"  ✗ {rng} | {stderr}")
+                print(f"    ✗ {cell} = {cols[col]} (FAILED)")
+                total_fail += 1
+    print(f"  {section_name}: {total_ok} written, {total_fail} failed")
 
 write_updates(eval_updates, "Evaluation")
 write_updates(anal_updates, "Analysis")
