@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 SHEET_ID = "1GlT_Qu4Fi3gl0qSMp798mg0wKEEG1_-iSNrVjQkV8wI"
 DRAFT_TAB = "משמרות הערכה ועיבוד - טיוטא"
 PROD_TAB = "משמרות הערכה ועיבוד"
-MAX_DAYS = 14
+MAX_DAYS = 16  # from 14/05 (today) to 30/05 (end of 2nd full week) = 16 days
 SHIFT_ROWS = [4, 5, 9, 10]
 PENDING_FILE = os.path.expanduser("~/.hermes/.miluim_pending_approval.json")
 
@@ -22,7 +22,7 @@ def gws(*args):
     return json.loads(t[s:e+1]) if s >= 0 else None
 
 def read_settings():
-    result = subprocess.run(["gws","sheets","+read","--spreadsheet",SHEET_ID,"--range","'settings'!A47:B60","--format","json"], capture_output=True, text=True)
+    result = subprocess.run(["gws","sheets","+read","--spreadsheet",SHEET_ID,"--range","'settings'!A40:B60","--format","json"], capture_output=True, text=True)
     raw = result.stdout
     s = raw.find("{"); e = raw.rfind("}")
     if s < 0: return {}
@@ -71,28 +71,47 @@ subprocess.run(["gws","sheets","spreadsheets","values","update",
     "--json",json.dumps({"values":norm}),"--format","json"], capture_output=True)
 print("1. ✅ Copied prod → draft")
 
-# Step 3: Clear beyond cutoff
-cutoff_col = None
+# Step 3: Find cutoff column — search from today's column forward
+today_str = today.strftime("%d/%m/%y")
+today_key = today_str[6:8] + today_str[3:5] + today_str[0:2]
+
 headers = norm[0] if norm else []
+cutoff_col = None
+today_col = None
+
+# First find today's column, then search forward for cutoff
 for ci, cell in enumerate(headers):
     m = re.search(r"(\d{2})/(\d{2})/(\d{2})", str(cell))
     if m:
         d_key = m.group(3) + m.group(2) + m.group(1)
-        if d_key >= cutoff_key:
+        if d_key == today_key:
+            today_col = ci
+        if today_col is not None and d_key >= cutoff_key and d_key > today_key:
             cutoff_col = ci
             break
+
+if cutoff_col is None:
+    # Fallback: search all columns
+    for ci, cell in enumerate(headers):
+        m = re.search(r"(\d{2})/(\d{2})/(\d{2})", str(cell))
+        if m:
+            d_key = m.group(3) + m.group(2) + m.group(1)
+            if d_key >= cutoff_key:
+                cutoff_col = ci
+                break
+
 if cutoff_col is None: print("Cutoff not found"); sys.exit(1)
 
-empty = [""] * (74 - cutoff_col)
 for row in SHIFT_ROWS:
     cl = col_letter(cutoff_col)
+    empty = [""] * (74 - cutoff_col)
     subprocess.run(["gws","sheets","spreadsheets","values","update",
-        "--params",json.dumps({"spreadsheetId":SHEET_ID,"range":f"'{DRAFT_TAB}'!{cl}{row}:BV{row}","valueInputOption":"USER_ENTERED"}),
+        "--params",json.dumps({"spreadsheetId":SHEET_ID,"range":f"'{DRAFT_TAB}'!{cl}{row}:BV{row}","valueInputOption":"RAW"}),
         "--json",json.dumps({"values":[empty]}),"--format","json"], capture_output=True)
 print(f"2. ✅ Cleared from {cl} onward (14-day cutoff)")
 
 # Step 4: Run solver
-r = subprocess.run(["python3","/home/omer/.hermes/scripts/miluim_auto_fill.py","--max-days","14"],
+r = subprocess.run(["python3","/home/omer/.hermes/scripts/miluim_auto_fill.py","--max-days",str(MAX_DAYS)],
     capture_output=True, text=True, timeout=120)
 solver_out = r.stdout
 print(f"3. ✅ Solver ran ({solver_out.count('written')} writes)")
@@ -110,17 +129,27 @@ if not require_approval:
             "--json",json.dumps({"values":norm}),"--format","json"], capture_output=True)
     print("4. ✅ Published to prod (auto, no approval required)")
     
+    # Also backup to the backup tab
+    backup_tab = "גיבוי משמרות הערכה ועיבוד"
+    data = gws("sheets","+read","--spreadsheet",SHEET_ID,"--range",f"'{PROD_TAB}'!A1:BV75","--format","json")
+    if data:
+        vals = data.get("values",[])
+        subprocess.run(["gws","sheets","spreadsheets","values","update",
+            "--params",json.dumps({"spreadsheetId":SHEET_ID,"range":f"'{backup_tab}'!A1:BV{len(vals)}","valueInputOption":"USER_ENTERED"}),
+            "--json",json.dumps({"values":vals},ensure_ascii=False),"--format","json"], capture_output=True)
+        print("5. ✅ Backed up to גיבוי משמרות הערכה ועיבוד")
+    
     all_to = list(set(admins + recipients))
     send_email(all_to, "Miluim Schedule Published",
         f"A new 2-week schedule has been automatically published.\n"
         f"Date: {today.strftime('%d/%m/%y')}\n"
         f"Covers: next {MAX_DAYS} days\n"
         f"Google Calendar has been synced.")
-    print("5. ✅ Email sent to admins + recipients")
+    print("6. ✅ Email sent to admins + recipients")
     
     # Run calendar sync
     subprocess.run(["python3","/home/omer/.hermes/scripts/miluim_calendar_sync_v2.py"], capture_output=True, timeout=120)
-    print("6. ✅ Calendar synced")
+    print("7. ✅ Calendar synced")
     
 else:
     # Save pending state
@@ -138,15 +167,24 @@ else:
     draft_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit#gid={1653764399}"
     
     all_to = list(set(admins))
-    send_email(all_to, f"[APPROVAL REQUIRED {tracking_id}] Miluim Schedule Draft Ready",
-        f"A new 2-week schedule has been generated in the draft sheet.\n\n"
-        f"Please review the draft here:\n{draft_url}\n\n"
-        f"You may make manual adjustments directly in the draft sheet.\n\n"
-        f"When ready, reply to this email with the word 'approved' "
-        f"(include the tracking ID {tracking_id} in your reply).\n\n"
-        f"The schedule will be published to prod and synced to Google Calendar after your approval.\n\n"
-        f"Date: {today.strftime('%d/%m/%y')}\n"
-        f"Covers: next {MAX_DAYS} days")
+    # Send HTML email with bold formatting
+    html_body = (
+        f"<p>A new 2-week schedule has been generated in the draft sheet.</p>\n"
+        f"<p>Please review the draft here:<br>\n"
+        f"<a href='{draft_url}'>{draft_url}</a></p>\n"
+        f"<p>You may make manual adjustments directly in the draft sheet.</p>\n"
+        f"<p><strong>When ready, reply to this email with the word 'approved' "
+        f"(include the tracking ID {tracking_id} in your reply).</strong></p>\n"
+        f"<p>The schedule will be published to prod and synced to Google Calendar after your approval.</p>\n"
+        f"<p>Date: {today.strftime('%d/%m/%y')}<br>\n"
+        f"Covers: next {MAX_DAYS} days</p>"
+    )
+    result = subprocess.run(
+        ["gws", "gmail", "+send", "--to", ",".join(all_to),
+         "--subject", f"[APPROVAL REQUIRED {tracking_id}] Miluim Schedule Draft Ready",
+         "--body", "Please view this email in HTML mode.", "--html", html_body],
+        capture_output=True, text=True, timeout=30
+    )
     
     print(f"4. ⏳ Approval required. Email sent to {admins}")
     print(f"   Tracking ID: {tracking_id}")

@@ -88,6 +88,16 @@ if data:
         "--json",json.dumps({"values":norm}),"--format","json"], capture_output=True)
 print("✅ Published to prod")
 
+# Backup to backup tab
+backup_tab = "גיבוי משמרות הערכה ועיבוד"
+data = gws("sheets","+read","--spreadsheet",SHEET_ID,"--range",f"'{PROD_TAB}'!A1:BV75","--format","json")
+if data:
+    vals = data.get("values",[])
+    subprocess.run(["gws","sheets","spreadsheets","values","update",
+        "--params",json.dumps({"spreadsheetId":SHEET_ID,"range":f"'{backup_tab}'!A1:BV{len(vals)}","valueInputOption":"USER_ENTERED"}),
+        "--json",json.dumps({"values":vals},ensure_ascii=False),"--format","json"], capture_output=True)
+print("✅ Backed up to גיבוי משמרות הערכה ועיבוד")
+
 # Sync calendar
 subprocess.run(["python3","/home/omer/.hermes/scripts/miluim_calendar_sync_v2.py"], capture_output=True, timeout=120)
 print("✅ Calendar synced")

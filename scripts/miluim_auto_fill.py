@@ -130,6 +130,17 @@ while i < len(date_cols):
     else:
         i += 1  # gap between weeks (shouldn't normally happen)
 
+# Phase 3: trailing partial week (dates after last full Sun-Sat block)
+processed_cols = {col for week in weeks for col in week["days"]}
+trailing = [c for c in date_cols if c not in processed_cols]
+if trailing:
+    weeks.append({
+        "days": trailing,
+        "start_date": col_to_date[trailing[0]],
+        "end_date": col_to_date[trailing[-1]]
+    })
+    print(f"Added trailing partial week: {col_to_date[trailing[0]]} to {col_to_date[trailing[-1]]} ({len(trailing)} days)")
+
 if not weeks:
     print("No week blocks found"); sys.exit(1)
 print(f"Found {len(weeks)} week block(s) from {weeks[0]['start_date']} to {weeks[-1]['end_date']}")
@@ -202,11 +213,15 @@ def is_weekend(col):
     day = get_day(col)
     return day in (4, 5)  # Fri=4, Sat=5
 
-def solve_week(week, people_data, running_counts, team_name="eval", prev_week_nights=None):
+def solve_week(week, people_data, running_counts, team_name="eval", prev_week_nights=None, existing_n=None, existing_m=None, night_counts=None):
     """Solve a single week's assignments. Returns (mornings, nights) dicts."""
     days = week["days"]
     mornings = {}
     nights = {}
+    night_counts = night_counts or defaultdict(int)
+    # Merge existing assignments so Rule 2 checks work across pre-filled cells
+    existing_n = existing_n or {}
+    existing_m = existing_m or {}
     
     # Build availability matrix
     avail_m = {}  # {col: [list of available people]}
@@ -241,13 +256,27 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
     # Sort nights by availability (fewest options first)
     # Night assignment in calendar order so consecutive counts are accurate
     for col in days:
+        # Skip already-filled night slots
+        if col in existing_n:
+            best = existing_n[col]
+            consecutive_counts[best] = consecutive_counts.get(best, 0) + 1
+            for p in people_data:
+                if p != best:
+                    consecutive_counts[p] = 0
+            continue
+
+        # Same-day morning (existing or newly assigned) — can't double-book
+        same_day_morning = existing_m.get(col) or mornings.get(col)
         candidates = [p for p in avail_n[col]
-                      if p not in nights.values()]  # can't do double same night
+                      if p not in nights.values()  # can't do double same night
+                      and p != same_day_morning]    # can't do same-day both
+        if not candidates:
+            candidates = [p for p in avail_n[col] if p != same_day_morning]
         if not candidates:
             candidates = avail_n[col]
 
         def score(p, _col=col):
-            base = running_counts.get(p, 0)
+            base = running_counts.get(p, 0) * 3
             night_penalty = 5 if p in nights.values() else 0
             is_night_only = all(check_constraint(p, c, "morning", people_data) == False
                               for c in days)
@@ -259,7 +288,26 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
                 consec_penalty = 20
             else:
                 consec_penalty = 0
-            return base + night_penalty + night_bonus + consec_penalty
+            # Check if assigning this person to tonight starves tomorrow's morning
+            tomorrow_idx = days.index(_col) + 1
+            starve_penalty = 0
+            if tomorrow_idx < len(days):
+                tomorrow_col = days[tomorrow_idx]
+                # If tomorrow's morning is already filled, check Rule 2
+                tomorrow_existing_m = existing_m.get(tomorrow_col)
+                if tomorrow_existing_m and norm(tomorrow_existing_m) == norm(p):
+                    starve_penalty = 500  # Would create Rule 2 violation with existing morning
+                else:
+                    tomorrow_avail = [
+                        p2 for p2 in people_data
+                        if check_constraint(p2, tomorrow_col, "morning", people_data)
+                        and p2 != p
+                    ]
+                    if len(tomorrow_avail) < 2:
+                        starve_penalty = 500  # Need 2+ candidates: one for morning, one for night
+            # Prefer people with fewer night shifts already assigned across all weeks
+            night_imbalance = night_counts.get(p, 0) * 3
+            return base + night_penalty + night_bonus + consec_penalty + starve_penalty + night_imbalance
 
         if not candidates:
             print(f"  ⚠ No night candidates for {col_to_date.get(col, col)}, skipping")
@@ -268,6 +316,7 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
         best = candidates[0]
         nights[col] = best
         running_counts[best] = running_counts.get(best, 0) + 1
+        night_counts[best] = night_counts.get(best, 0) + 1
         # Update consecutive counts: increment winner, reset everyone else
         consecutive_counts[best] = consecutive_counts.get(best, 0) + 1
         for p in people_data:
@@ -280,33 +329,48 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
     
     for col in morning_order:
         # Check Rule 2: can't assign if person did previous night
+        # Check both newly-assigned nights AND pre-existing nights
         prev_day_idx = days.index(col) - 1 if col in days else -1
         prev_night_person = None
         if prev_day_idx >= 0:
             prev_col = days[prev_day_idx]
-            prev_night_person = nights.get(prev_col)
-        
-        candidates = [p for p in avail_m[col] 
+            prev_night_person = nights.get(prev_col) or existing_n.get(prev_col)
+        elif prev_week_nights:
+            # First day of week: check last night of previous week
+            sorted_prev = sorted(prev_week_nights.keys())
+            if sorted_prev:
+                prev_night_person = prev_week_nights.get(sorted_prev[-1])
+
+        # Same-day night: also check existing same-day night assignment
+        same_day_night = nights.get(col) or existing_n.get(col)
+        # Same-day morning: check existing same-day morning assignment (already filled slot)
+        same_day_morning = existing_m.get(col)
+
+        candidates = [p for p in avail_m[col]
                       if p != prev_night_person  # Rule 2
                       and p not in mornings.values()  # can't double same morning
-                      and p != nights.get(col)]  # BUG FIX: can't double same-day night
-        
+                      and p != same_day_night  # can't double same-day night
+                      and p != same_day_morning]  # skip already-filled morning slots
+
         if not candidates:
-            candidates = [p for p in avail_m[col] if p != prev_night_person and p != nights.get(col)]
+            candidates = [p for p in avail_m[col] if p != prev_night_person and p != same_day_night]
         if not candidates:
             candidates = avail_m[col]
-        
+
         def score_m(p):
-            base = running_counts.get(p, 0)
+            base = running_counts.get(p, 0) * 3
             dup = 5 if p in mornings.values() else 0
             # Weekend rule: prefer people who haven't done weekend shifts
             weekend_penalty = 0
             if is_weekend(col):
-                # If they already have a Fri or Sat shift
                 for c in days:
                     if is_weekend(c) and (mornings.get(c) == p or nights.get(c) == p):
                         weekend_penalty += 3
-            return base + dup + weekend_penalty
+            # Heavy penalty for Rule 2 violation (night->morning)
+            prev_night_penalty = 100 if p == prev_night_person else 0
+            # Prevent same-day double-booking (night+morning)
+            same_day_night_penalty = 100 if p == same_day_night else 0
+            return base + dup + weekend_penalty + prev_night_penalty + same_day_night_penalty
         
         if not candidates:
             print(f"  ⚠ No morning candidates for {col_to_date.get(col, col)}, skipping")
@@ -322,6 +386,7 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
 def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_night, team_name):
     """Fill all weeks for a section (evaluation or analysis)."""
     running = defaultdict(int)
+    night_counts = defaultdict(int)
     prev_week_nights = None
 
     # Count existing shifts from already-filled weeks
@@ -352,6 +417,7 @@ def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_n
                 running[p] += 1
             for p in existing_n.values():
                 running[p] += 1
+                night_counts[p] += 1
             prev_week_nights = existing_n
             print(f"  {team_name} week {w_idx+1} ({week['start_date']}-{week['end_date']}): already filled, skipped")
         elif has_existing:
@@ -360,7 +426,9 @@ def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_n
                 running[p] += 1
             for p in existing_n.values():
                 running[p] += 1
-            m, n = solve_week(week, people_data, running, team_name, prev_week_nights)
+                night_counts[p] += 1
+            m, n = solve_week(week, people_data, running, team_name, prev_week_nights,
+                              existing_n=existing_n, existing_m=existing_m, night_counts=night_counts)
             prev_week_nights = {**existing_n, **n}
 
             for col in week["days"]:
@@ -375,7 +443,7 @@ def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_n
             print(f"  {team_name} week {w_idx+1} ({week['start_date']}-{week['end_date']}): {existing_count} existing + {filled_now} new = {len(week['days'])*2} total")
         else:
             # Solve this week
-            m, n = solve_week(week, people_data, running, team_name, prev_week_nights)
+            m, n = solve_week(week, people_data, running, team_name, prev_week_nights, night_counts=night_counts)
             prev_week_nights = n
 
             for col in week["days"]:
