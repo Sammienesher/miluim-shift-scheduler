@@ -197,7 +197,7 @@ def check_constraint(person, col, shift_type, constraints):
     if val == "יכול": return True
     if val == "יכול רק בוקר": return shift_type == "morning"
     if val == "יכול רק לילה": return shift_type == "night"
-    if val == "לא ידוע": return True  # treat unknown as available
+    if val == "לא ידוע": return False  # unknown means don't schedule
     return True
 
 def get_day(col):
