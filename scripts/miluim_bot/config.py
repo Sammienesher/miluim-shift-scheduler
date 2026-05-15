@@ -1,7 +1,10 @@
 import logging
+import os
 
 SHEET_ID = "1GlT_Qu4Fi3gl0qSMp798mg0wKEEG1_-iSNrVjQkV8wI"
-TOKEN = "8931639383:AAGGVHUbarwOvkYdLWXS_DuTWWlJTlTrMsM"
+TOKEN = os.environ.get("SHIFTTY_BOT_TOKEN", "")
+if not TOKEN:
+    raise RuntimeError("SHIFTTY_BOT_TOKEN environment variable not set")
 GROUPS_TAB = "groups"
 SCHEDULE_TAB = "משמרות הערכה ועיבוד"
 SHIFT_1_NAME = "בוקר"

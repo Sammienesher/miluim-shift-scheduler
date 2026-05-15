@@ -1,6 +1,11 @@
 #!/bin/bash
 # Register Shiftty bot name, description, and commands with Telegram
-TOKEN="8931639383:AAGGVHUbarwOvkYdLWXS_DuTWWlJTlTrMsM"
+# Usage: SHIFTTY_BOT_TOKEN=xxx ./register_bot.sh
+TOKEN="${SHIFTTY_BOT_TOKEN}"
+if [ -z "$TOKEN" ]; then
+  echo "ERROR: SHIFTTY_BOT_TOKEN not set"
+  exit 1
+fi
 
 echo "Setting bot name..."
 curl -s -X POST "https://api.telegram.org/bot$TOKEN/setMyName" -d "name=Shiftty"
