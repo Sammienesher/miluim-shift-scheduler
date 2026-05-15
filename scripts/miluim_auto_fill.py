@@ -26,6 +26,30 @@ def norm(s):
     s = s.strip().replace("\u2019","'").replace("\u2018","'")
     return re.sub(r'\s+',' ',s)
 
+# Read scheduling rules from settings sheet
+SETTINGS = "settings"
+def read_setting(name):
+    params = json.dumps({"spreadsheetId": SHEET_ID, "range": f"'{SETTINGS}'!A1:C50", "valueInputOption": "USER_ENTERED"})
+    result = gws("sheets", "spreadsheets", "values", "get", "--params", params)
+    if result and "values" in result:
+        for row in result["values"]:
+            if len(row) >= 2 and norm(row[0]) == name:
+                return norm(row[1])
+    return None
+
+MIN_SHIFTS_14 = int(read_setting("min_shifts_per_14_days") or "7")
+NIGHT_WEIGHT = int(read_setting("night_shift_weight") or "2")
+RULE_EFFECTIVE_DATE = read_setting("rule_effective_date") or "31/05/26"
+
+def date_str_to_dt(date_str):
+    """Convert DD/MM/YY to datetime."""
+    parts = date_str.split('/')
+    return datetime(2000+int(parts[2]), int(parts[1]), int(parts[0]))
+
+EFFECTIVE_DT = date_str_to_dt(RULE_EFFECTIVE_DATE)
+print(f"Rule: min {MIN_SHIFTS_14} weighted shifts / 14 days, effective {RULE_EFFECTIVE_DATE}")
+print(f"  Morning=1 weight, Night={NIGHT_WEIGHT} weight")
+
 def extract_date(cell):
     m = re.search(r'(\d{2})/(\d{2})/(\d{2})', str(cell))
     return f"{m.group(1)}/{m.group(2)}/{m.group(3)}" if m else None
@@ -213,7 +237,7 @@ def is_weekend(col):
     day = get_day(col)
     return day in (4, 5)  # Fri=4, Sat=5
 
-def solve_week(week, people_data, running_counts, team_name="eval", prev_week_nights=None, existing_n=None, existing_m=None, night_counts=None):
+def solve_week(week, people_data, running_counts, team_name="eval", prev_week_nights=None, existing_n=None, existing_m=None, night_counts=None, weighted_counts=None):
     """Solve a single week's assignments. Returns (mornings, nights) dicts."""
     days = week["days"]
     mornings = {}
@@ -307,7 +331,16 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
                         starve_penalty = 500  # Need 2+ candidates: one for morning, one for night
             # Prefer people with fewer night shifts already assigned across all weeks
             night_imbalance = night_counts.get(p, 0) * 3
-            return base + night_penalty + night_bonus + consec_penalty + starve_penalty + night_imbalance
+            # Min weighted shifts rule (effective from EFFECTIVE_DT)
+            min_penalty = 0
+            col_date_str = col_to_date.get(_col, "")
+            if col_date_str and date_str_to_dt(col_date_str) >= EFFECTIVE_DT and weighted_counts:
+                p_w = weighted_counts.get(p, 0)
+                all_w = [weighted_counts.get(pp, 0) for pp in people_data]
+                avg_w = sum(all_w) / max(len(all_w), 1) if all_w else 0
+                if p_w < avg_w:
+                    min_penalty = (avg_w - p_w) * 10
+            return base + night_penalty + night_bonus + consec_penalty + starve_penalty + night_imbalance - min_penalty
 
         if not candidates:
             print(f"  ⚠ No night candidates for {col_to_date.get(col, col)}, skipping")
@@ -370,7 +403,16 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
             prev_night_penalty = 100 if p == prev_night_person else 0
             # Prevent same-day double-booking (night+morning)
             same_day_night_penalty = 100 if p == same_day_night else 0
-            return base + dup + weekend_penalty + prev_night_penalty + same_day_night_penalty
+            # Min weighted shifts rule (effective from EFFECTIVE_DT)
+            min_penalty = 0
+            col_date_str = col_to_date.get(col, "")
+            if col_date_str and date_str_to_dt(col_date_str) >= EFFECTIVE_DT and weighted_counts:
+                p_w = weighted_counts.get(p, 0)
+                all_w = [weighted_counts.get(pp, 0) for pp in people_data]
+                avg_w = sum(all_w) / max(len(all_w), 1) if all_w else 0
+                if p_w < avg_w:
+                    min_penalty = (avg_w - p_w) * 10
+            return base + dup + weekend_penalty + prev_night_penalty + same_day_night_penalty - min_penalty
         
         if not candidates:
             print(f"  ⚠ No morning candidates for {col_to_date.get(col, col)}, skipping")
@@ -387,6 +429,7 @@ def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_n
     """Fill all weeks for a section (evaluation or analysis)."""
     running = defaultdict(int)
     night_counts = defaultdict(int)
+    weighted_counts = defaultdict(int)
     prev_week_nights = None
 
     # Count existing shifts from already-filled weeks
@@ -415,27 +458,34 @@ def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_n
             # Week fully filled - just count existing
             for p in existing_m.values():
                 running[p] += 1
+                weighted_counts[p] += 1
             for p in existing_n.values():
                 running[p] += 1
                 night_counts[p] += 1
+                weighted_counts[p] += NIGHT_WEIGHT
             prev_week_nights = existing_n
             print(f"  {team_name} week {w_idx+1} ({week['start_date']}-{week['end_date']}): already filled, skipped")
         elif has_existing:
             # BUG FIX: Partially filled week - preserve existing, fill gaps
             for p in existing_m.values():
                 running[p] += 1
+                weighted_counts[p] += 1
             for p in existing_n.values():
                 running[p] += 1
                 night_counts[p] += 1
+                weighted_counts[p] += NIGHT_WEIGHT
             m, n = solve_week(week, people_data, running, team_name, prev_week_nights,
-                              existing_n=existing_n, existing_m=existing_m, night_counts=night_counts)
+                              existing_n=existing_n, existing_m=existing_m, night_counts=night_counts,
+                              weighted_counts=weighted_counts)
             prev_week_nights = {**existing_n, **n}
 
             for col in week["days"]:
                 if col not in existing_m and col in m:
                     all_updates[(row_morning, col)] = m[col]
+                    weighted_counts[m[col]] += 1
                 if col not in existing_n and col in n:
                     all_updates[(row_night, col)] = n[col]
+                    weighted_counts[n[col]] += NIGHT_WEIGHT
 
             existing_count = len(existing_m) + len(existing_n)
             filled_now = len([c for c in week["days"] if c not in existing_m and c in m]) + \
@@ -443,14 +493,17 @@ def fill_section(people_data, existing_m_row, existing_n_row, row_morning, row_n
             print(f"  {team_name} week {w_idx+1} ({week['start_date']}-{week['end_date']}): {existing_count} existing + {filled_now} new = {len(week['days'])*2} total")
         else:
             # Solve this week
-            m, n = solve_week(week, people_data, running, team_name, prev_week_nights, night_counts=night_counts)
+            m, n = solve_week(week, people_data, running, team_name, prev_week_nights, night_counts=night_counts,
+                              weighted_counts=weighted_counts)
             prev_week_nights = n
 
             for col in week["days"]:
                 if col not in existing_m and col in m:
                     all_updates[(row_morning, col)] = m[col]
+                    weighted_counts[m[col]] += 1
                 if col not in existing_n and col in n:
                     all_updates[(row_night, col)] = n[col]
+                    weighted_counts[n[col]] += NIGHT_WEIGHT
 
             print(f"  {team_name} week {w_idx+1} ({week['start_date']}-{week['end_date']}): assigned")
     
