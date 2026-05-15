@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: 'Google Sans', Arial, sans-serif;
+      padding: 16px;
+      direction: rtl;
+      color: #202124;
+      margin: 0;
+      font-size: 14px;
+    }
+    h2 {
+      font-size: 18px;
+      margin-top: 0;
+      margin-bottom: 20px;
+      color: #202124;
+      font-weight: 500;
+    }
+    .field { margin-bottom: 16px; }
+    label {
+      display: block;
+      font-size: 13px;
+      color: #5f6368;
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+    select, input[type="date"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      font-size: 14px;
+      box-sizing: border-box;
+      color: #202124;
+      background: #fff;
+      appearance: auto;
+    }
+    select:focus, input[type="date"]:focus {
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 2px rgba(26,115,232,0.15);
+    }
+    .btn-primary {
+      width: 100%;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 24px;
+      padding: 12px 24px;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    .btn-primary:hover { background: #1557b0; }
+    .btn-primary:disabled { background: #ccc; cursor: default; }
+    .btn-secondary {
+      width: 100%;
+      background: white;
+      color: #1a73e8;
+      border: 1px solid #dadce0;
+      border-radius: 24px;
+      padding: 12px 24px;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 14px;
+      box-sizing: border-box;
+      margin-top: 8px;
+    }
+    .btn-secondary:hover { background: #f8f9fa; }
+    .btn-secondary:disabled { color: #aaa; cursor: default; }
+    .results { margin-top: 16px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      background: #f8f9fa;
+      color: #5f6368;
+      font-weight: 500;
+      padding: 8px 12px;
+      text-align: right;
+      border-bottom: 2px solid #e8eaed;
+    }
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #f1f3f4;
+    }
+    tr.shift-morning td:first-child { border-right: 3px solid #34a853; }
+    tr.shift-night  td:first-child { border-right: 3px solid #1a73e8; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .badge-morning { background: #e6f4ea; color: #137333; }
+    .badge-night   { background: #e8f0fe; color: #1a73e8; }
+    .summary {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 12px;
+      font-size: 13px;
+      line-height: 1.8;
+    }
+    .summary strong { color: #202124; }
+    .loader { display: none; text-align: center; padding: 24px; color: #5f6368; }
+    .loader.show { display: block; }
+    .error-box {
+      color: #d93025;
+      background: #fce8e6;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 12px;
+      font-size: 13px;
+    }
+    .success-box {
+      color: #137333;
+      background: #e6f4ea;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 12px;
+      font-size: 13px;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 24px;
+      color: #5f6368;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <h2>📋 לוח משמרות אישי</h2>
+
+  <div class="field">
+    <label for="name">בחר/י שם</label>
+    <select id="name" onchange="onNameChange()">
+      <option value="">— בחר/י שם —</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="startDate">תאריך התחלה</label>
+    <input type="date" id="startDate" value="2026-05-06">
+  </div>
+
+  <div class="field">
+    <label for="endDate">תאריך סיום</label>
+    <input type="date" id="endDate" value="2026-07-08">
+  </div>
+
+  <button class="btn-primary" onclick="showItinerary()" id="showBtn" disabled>הצג לוח משמרות</button>
+
+  <div class="loader" id="loader">⏳ טוען...</div>
+
+  <div class="results" id="results" style="display:none;"></div>
+
+  <script>
+    // Load people on init
+    google.script.run
+      .withSuccessHandler(populateNames)
+      .withFailureHandler(function(err) {
+        showError('שגיאה בטעינת שמות: ' + err.message);
+      })
+      .getPeople();
+
+    function populateNames(people) {
+      var select = document.getElementById('name');
+      people.forEach(function(p) {
+        var opt = document.createElement('option');
+        opt.value = p.name;
+        opt.textContent = p.name + ' (' + p.team + ')';
+        select.appendChild(opt);
+      });
+    }
+
+    function onNameChange() {
+      document.getElementById('showBtn').disabled = !document.getElementById('name').value;
+    }
+
+    function showItinerary() {
+      var name  = document.getElementById('name').value;
+      var start = document.getElementById('startDate').value;
+      var end   = document.getElementById('endDate').value;
+
+      if (!name)          { alert('נא לבחור שם'); return; }
+      if (!start || !end) { alert('נא לבחור טווח תאריכים'); return; }
+      if (start > end)    { alert('תאריך התחלה חייב להיות לפני תאריך סיום'); return; }
+
+      setLoading(true);
+
+      google.script.run
+        .withSuccessHandler(function(shifts) {
+          setLoading(false);
+          displayResults(name, shifts, start, end);
+        })
+        .withFailureHandler(function(err) {
+          setLoading(false);
+          showError('שגיאה: ' + err.message);
+        })
+        .getShifts(name, start, end);
+    }
+
+    function displayResults(name, shifts, start, end) {
+      var container = document.getElementById('results');
+
+      if (!shifts || shifts.length === 0) {
+        container.innerHTML = '<div class="empty-state">😴 אין משמרות בטווח תאריכים זה</div>';
+        container.style.display = 'block';
+        return;
+      }
+
+      var mornings = shifts.filter(function(s) { return s.shiftType === 'בוקר'; }).length;
+      var nights   = shifts.filter(function(s) { return s.shiftType === 'לילה'; }).length;
+      var total    = shifts.length;
+
+      var html = '<table>';
+      html += '<tr><th>תאריך</th><th>יום</th><th>משמרת</th></tr>';
+
+      shifts.forEach(function(s) {
+        var p = s.date.split('-');
+        var formatted = p[2] + '/' + p[1] + '/' + p[0].slice(-2);
+        var rowClass   = s.shiftType === 'בוקר' ? 'shift-morning' : 'shift-night';
+        var badgeClass = s.shiftType === 'בוקר' ? 'badge-morning' : 'badge-night';
+        html += '<tr class="' + rowClass + '">';
+        html += '<td>' + formatted + '</td>';
+        html += '<td>' + s.dayName + '</td>';
+        html += '<td><span class="badge ' + badgeClass + '">' + s.shiftType + '</span></td>';
+        html += '</tr>';
+      });
+
+      html += '</table>';
+
+      html += '<div class="summary">';
+      html += '<strong>' + name + '</strong><br>';
+      html += 'סה"כ: <strong>' + total + '</strong> משמרות &nbsp;|&nbsp; ';
+      html += '<span style="color:#137333;">☀️ ' + mornings + ' בוקר</span> &nbsp;|&nbsp; ';
+      html += '<span style="color:#1a73e8;">🌙 ' + nights + ' לילה</span>';
+      html += '</div>';
+
+      html += '<button class="btn-secondary" onclick="emailItinerary()" id="emailBtn">📧 שלח/י לי את הלוח באימייל</button>';
+
+      container.innerHTML = html;
+      container.style.display = 'block';
+    }
+
+    function emailItinerary() {
+      var name  = document.getElementById('name').value;
+      var start = document.getElementById('startDate').value;
+      var end   = document.getElementById('endDate').value;
+      var btn   = document.getElementById('emailBtn');
+
+      btn.disabled    = true;
+      btn.textContent = '⏳ שולח...';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            btn.textContent = '✅ נשלח בהצלחה (' + result.count + ' משמרות)';
+            btn.className   = 'btn-secondary';
+          } else {
+            btn.textContent = '❌ שגיאה';
+            btn.disabled    = false;
+            showError(result.error || 'שליחה נכשלה');
+          }
+        })
+        .withFailureHandler(function(err) {
+          btn.textContent = '❌ שגיאה';
+          btn.disabled    = false;
+          showError('שגיאה: ' + err.message);
+        })
+        .emailItinerary(name, start, end);
+    }
+
+    function setLoading(on) {
+      document.getElementById('loader').className   = on ? 'loader show' : 'loader';
+      document.getElementById('results').style.display = on ? 'none' : '';
+      document.getElementById('showBtn').disabled   = on;
+    }
+
+    function showError(msg) {
+      var container = document.getElementById('results');
+      container.innerHTML    = '<div class="error-box">' + msg + '</div>';
+      container.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
