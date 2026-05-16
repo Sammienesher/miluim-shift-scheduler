@@ -217,8 +217,10 @@ def main():
 
     all_events = fetch_all_events(CALENDAR_ID, time_min, time_max)
 
-    # lookup: "date|shift_type|team" -> (person, event_id)
-    existing_lookup = {}
+    from collections import defaultdict
+
+    # Group events by key (handles duplicates)
+    keyed_events = defaultdict(list)
     if all_events:
         for ev in all_events:
             summary = ev.get('summary', '')
@@ -232,10 +234,33 @@ def main():
                     dt = datetime.fromisoformat(start_str)
                     date_key = dt.strftime("%d/%m/%Y")
                     key = f"{date_key}|{shift_type}|{team}"
-                    existing_lookup[key] = (person, ev['id'])
+                    keyed_events[key].append((person, ev['id']))
 
-        print(f"Found {len(all_events)} events, {len(existing_lookup)} matched")
+        # Build a clean lookup: for duplicates, keep the one matching the sheet
+        existing_lookup = {}
+        dedup_deleted = 0
+        for key, events in keyed_events.items():
+            if len(events) == 1:
+                existing_lookup[key] = events[0]
+                continue
+            # Duplicate! Find which one matches the sheet (if any)
+            sheet_person = next((p for d, s, p, t in all_shifts if f"{d}|{s}|{t}" == key), None)
+            kept = False
+            for person, eid in events:
+                if sheet_person and person == sheet_person and not kept:
+                    existing_lookup[key] = (person, eid)
+                    kept = True
+                else:
+                    if delete_event(eid):
+                        dedup_deleted += 1
+                        print(f"  Deleted duplicate: {key} -> {person}")
+            if not kept:
+                # No sheet match, keep the newest (last in list)
+                existing_lookup[key] = events[-1]
+
+        print(f"Found {len(all_events)} events, {len(keyed_events)} unique keys, {dedup_deleted} duplicates deleted")
     else:
+        existing_lookup = {}
         print("No existing events found")
 
     print()
