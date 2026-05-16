@@ -218,10 +218,141 @@ def find_swaps(shifts, constraints, person_a, target_date, target_type, target_t
     return proposals
 
 
-def apply_swap(shifts, propsal, person_a):
-    """Apply a swap directly to the sheet."""
-    # This writes the changes to the sheet cells
-    pass  # TODO in next iteration
+def get_person_email(person_name):
+    """Find email for person from the groups sheet."""
+    r = subprocess.run(["gws", "sheets", "+read", "--spreadsheet", SHEET_ID,
+        "--range", f"{GROUPS_TAB}!A2:F15", "--format", "json"], capture_output=True, text=True, timeout=15)
+    s, e = r.stdout.find("{"), r.stdout.rfind("}")
+    rows = json.loads(r.stdout[s:e+1])["values"] if s >= 0 else []
+    for row in rows:
+        for col in range(6):
+            if norm(row[col] if col < len(row) else "") == norm(person_name):
+                email_col = col + 1 if col % 3 == 0 else col + 1
+                for ec in [col + 1, col + 2]:
+                    if ec < len(row) and row[ec] and "@" in str(row[ec]):
+                        return str(row[ec]).strip()
+    return None
+
+
+def send_swap_email(person_a, person_b, a_date, a_type, a_team, b_date, b_type, b_team):
+    """Send swap proposal email to person_b asking for approval."""
+    email = get_person_email(person_b)
+    if not email:
+        print(f"ERROR: No email found for {person_b}")
+        return False
+    
+    subject = f"בקשת החלפת משמרת - {person_a}"
+    body = (
+        f"שלום {person_b},\n\n"
+        f"{person_a} מבקש להחליף איתך משמרות:\n\n"
+        f"🔴 {person_a} רוצה לתת לך: {a_date} ({a_type}) בצוות {a_team}\n"
+        f"🟢 בתמורה, {person_a} יקח ממך: {b_date} ({b_type}) בצוות {b_team}\n\n"
+        f"אם ההחלפה מתאימה לך, אנא השב לאימייל זה במילה \"מאשר\" או \"approve\".\n"
+        f"אם אינך מעוניין/תנת, השב במילה \"לא\" או פשוט התעלם מהודעה זו.\n\n"
+        f"תודה!\nמערכת משמרות מילואים"
+    )
+    
+    tracking_id = f"swap_{person_a.replace(' ', '')}_{person_b.replace(' ', '')}_{a_date.replace('/', '')}"
+    
+    # Save pending approval for monitoring
+    pending = {"tracking_id": tracking_id, "swap": True,
+        "person_a": person_a, "person_b": person_b,
+        "a_date": a_date, "a_type": a_type, "a_team": a_team,
+        "b_date": b_date, "b_type": b_type, "b_team": b_team,
+        "email_to": email, "sent_at": datetime.now().isoformat()}
+    with open("/tmp/miluim_swap_pending.json", "w", encoding="utf-8") as f:
+        json.dump(pending, f, ensure_ascii=False)
+    
+    # Send via gws gmail
+    r = subprocess.run(["gws", "gmail", "users", "messages", "send", "--params",
+        json.dumps({"userId": "me"}),
+        "--json", json.dumps({
+            "raw": __make_b64_email(email, subject, body, tracking_id)
+        })], capture_output=True, text=True, timeout=15)
+    
+    if r.returncode == 0:
+        print(f"Email sent to {person_b} ({email})")
+        print(f"Tracking ID: {tracking_id}")
+        return True
+    else:
+        print(f"ERROR sending email: {r.stderr[:200]}")
+        return False
+
+
+def __make_b64_email(to, subject, body, tracking_id):
+    """Create base64-encoded RFC2822 email."""
+    import base64
+    headers = (
+        f"From: omernesher@gmail.com\n"
+        f"To: {to}\n"
+        f"Subject: =?utf-8?B?{base64.b64encode(subject.encode()).decode()}?=\n"
+        f"X-Swap-Tracking: {tracking_id}\n"
+        f"MIME-Version: 1.0\n"
+        f"Content-Type: text/plain; charset=utf-8\n\n"
+        f"{body}"
+    )
+    return base64.urlsafe_b64encode(headers.encode()).decode()
+
+
+def apply_swap(person_a, person_b, a_date, a_type, a_team, b_date, b_type, b_team):
+    """Apply a swap directly to the sheet cells."""
+    rows = read_sheet_full()
+    if not rows:
+        print("ERROR: Could not read sheet")
+        return False
+    
+    changes = []
+    for team_name, row_h, row_m, row_n in [("הערכה", 2, 3, 4), ("עיבוד", 7, 8, 9)]:
+        headers = rows[row_h] if row_h < len(rows) else []
+        morning = rows[row_m] if row_m < len(rows) else []
+        night = rows[row_n] if row_n < len(rows) else []
+        
+        for col in range(1, len(headers)):
+            date_raw = str(headers[col]).strip() if col < len(headers) and headers[col] else ""
+            if not date_raw: continue
+            m = re.search(r"(\d{2})/(\d{2})/(\d{2})", date_raw)
+            if not m: continue
+            day, month, yr = m.group(1), m.group(2), m.group(3)
+            date_str = f"{day}/{month}/20{yr}"
+            
+            # Person A's shift to give away
+            if team_name == a_team and date_str == a_date:
+                sheet_row = row_m if a_type == "בוקר" else row_n
+                if col < len(sheet_row) and norm(str(sheet_row[col])) == norm(person_a):
+                    changes.append((row_m if a_type == "בוקר" else row_n, col, person_b))
+            
+            # Person B's shift to give to A
+            if team_name == b_team and date_str == b_date:
+                sheet_row = row_m if b_type == "בוקר" else row_n
+                if col < len(sheet_row) and norm(str(sheet_row[col])) == norm(person_b):
+                    changes.append((row_m if b_type == "בוקר" else row_n, col, person_a))
+    
+    if not changes:
+        print("ERROR: Could not find shifts to swap in the sheet")
+        return False
+    
+    # Apply changes via Sheets API
+    # Use gws sheets update
+    for gs_row, gs_col, new_person in changes:
+        # Convert 0-indexed internal to GSheets row/col (1-indexed)
+        gs_row_1 = gs_row + 1  # rows are 0-indexed in internal, 1-indexed in GSheets
+        gs_col_letter = chr(ord('B') + gs_col - 1) if gs_col > 0 else 'A'
+        cell_range = f"{PROD_TAB}!{gs_col_letter}{gs_row_1}"
+        
+        r = subprocess.run(["gws", "sheets", "values", "update", "--params",
+            json.dumps({"spreadsheetId": SHEET_ID, "range": cell_range,
+                        "valueInputOption": "USER_ENTERED"}),
+            "--json", json.dumps({"values": [[new_person]]})],
+            capture_output=True, text=True, timeout=15)
+        
+        if r.returncode == 0:
+            print(f"  Updated {cell_range}: {new_person}")
+        else:
+            print(f"  ERROR updating {cell_range}: {r.stderr[:100]}")
+            return False
+    
+    print(f"\n✅ Swap applied: {person_a} ↔ {person_b}")
+    return True
 
 
 def main():
