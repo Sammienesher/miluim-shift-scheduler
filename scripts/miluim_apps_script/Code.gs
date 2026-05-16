@@ -129,6 +129,18 @@ function getPeople() {
   return people;
 }
 
+function headerToISO(cell) {
+  // Handle Date objects (Google Sheets stores dates as actual Date objects)
+  if (cell instanceof Date) {
+    const tz = Session.getScriptTimeZone();
+    return Utilities.formatDate(cell, tz, 'yyyy-MM-dd');
+  }
+  // Handle string headers in DD/MM/YY format
+  const m = String(cell).match(/(\d{2})\/(\d{2})\/(\d{2})/);
+  if (!m) return null;
+  return ddmmyyToISO(m[1], m[2], m[3]);
+}
+
 function getShifts(personName, startDate, endDate) {
   const ss = SpreadsheetApp.openById(ITIN_SHEET_ID);
   const sheet = ss.getSheetByName(ITIN_SCHEDULE_TAB);
@@ -143,9 +155,8 @@ function getShifts(personName, startDate, endDate) {
   const startNum = dateToNum(startDate);
   const endNum   = dateToNum(endDate);
   for (let i = 0; i < numCols; i++) {
-    const m = String(headerR[i]).match(/(\d{2})\/(\d{2})\/(\d{2})/);
-    if (!m) continue;
-    const iso = ddmmyyToISO(m[1], m[2], m[3]);
+    const iso = headerToISO(headerR[i]);
+    if (!iso) continue;
     const shiftDate = new Date(iso + 'T12:00:00');
     const dayName = getDayNameHebrew(shiftDate);
     const dateNum = dateToNum(iso);
@@ -173,16 +184,13 @@ function debugNadav() {
   
   const nName = norm("נדב רבינוביץ'");
   
-  // Print cols 0 through 12 (06/05 through 16/05) — includes 10/05 and 12/05
+  // Print cols 0 through 12 — uses headerToISO for Date object support
   for (let i = 0; i <= 12; i++) {
-    const header = String(headerR[i]);
-    const m = header.match(/(\d{2})\/(\d{2})\/(\d{2})/);
-    if (!m) {
-      Logger.log('COL %s: header=[%s] NO DATE', i, header);
+    const iso = headerToISO(headerR[i]);
+    if (!iso) {
+      Logger.log('COL %s: header=[%s] NO DATE', i, String(headerR[i] || ''));
       continue;
     }
-    
-    const iso = ddmmyyToISO(m[1], m[2], m[3]);
     const t1s1val = t1s1[i] || '(EMPTY)';
     const t1s1norm = norm(t1s1[i] || '');
     const match = t1s1norm === nName;
@@ -266,7 +274,6 @@ function getMyShiftsWithTeam(personName) {
   const t2m = sheet.getRange(8, 2, 1, numCols).getValues()[0];
   const t2n = sheet.getRange(9, 2, 1, numCols).getValues()[0];
 
-  const dateRegex = /(\d{2})\/(\d{2})\/(\d{2})/;
   const results = [];
   const configs = [
     { row: t1m, team: 'הערכה', type: 'בוקר' },
@@ -279,12 +286,10 @@ function getMyShiftsWithTeam(personName) {
   today.setHours(0, 0, 0, 0);
 
   for (let i = 0; i < numCols; i++) {
-    const header = String(headers[i] || '');
-    const match = header.match(dateRegex);
-    if (!match) continue;
+    const isoDate = headerToISO(headers[i] || '');
+    if (!isoDate) continue;
 
-    const dateStr = match[1] + '/' + match[2] + '/20' + match[3];
-    const isoDate = ddmmyyToISO(match[1], match[2], match[3]);
+    const dateStr = Utilities.formatDate(new Date(isoDate + 'T12:00:00'), Session.getScriptTimeZone(), 'dd/MM/yy');
     const shiftDate = new Date(isoDate + 'T12:00:00');
     if (shiftDate < today) continue;
 
