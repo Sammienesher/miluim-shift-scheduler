@@ -40,15 +40,21 @@ def read_setting(name):
 MIN_SHIFTS_14 = int(read_setting("min_shifts_per_14_days") or "7")
 NIGHT_WEIGHT = int(read_setting("night_shift_weight") or "2")
 RULE_EFFECTIVE_DATE = read_setting("rule_effective_date") or "31/05/26"
+DATE_END_STR = read_setting("date_end")
+DATE_END_DT = date_str_to_dt(DATE_END_STR) if DATE_END_STR else None
 
 def date_str_to_dt(date_str):
-    """Convert DD/MM/YY to datetime."""
-    parts = date_str.split('/')
-    return datetime(2000+int(parts[2]), int(parts[1]), int(parts[0]))
+    """Convert DD/MM/YY or DD/MM/YYYY to datetime."""
+    parts = date_str.strip().split('/')
+    day, month = int(parts[0]), int(parts[1])
+    year = int(parts[2]) if int(parts[2]) > 99 else 2000 + int(parts[2])
+    return datetime(year, month, day)
 
 EFFECTIVE_DT = date_str_to_dt(RULE_EFFECTIVE_DATE)
-print(f"Rule: min {MIN_SHIFTS_14} weighted shifts / 14 days, effective {RULE_EFFECTIVE_DATE}")
-print(f"  Morning=1 weight, Night={NIGHT_WEIGHT} weight")
+print(f"=== PRIORITY: Balance absolute shifts > 7-point weighted floor > Constraints ===")
+print(f"Min {MIN_SHIFTS_14} weighted points / 14 days (morning=1, night={NIGHT_WEIGHT}), effective {RULE_EFFECTIVE_DATE}")
+if DATE_END_DT:
+    print(f"  Cutoff: {DATE_END_STR} (no assignments after this date)")
 
 def extract_date(cell):
     m = re.search(r'(\d{2})/(\d{2})/(\d{2})', str(cell))
@@ -94,19 +100,22 @@ def date_diff(d):
     return (dt - today).days
 
 def is_beyond_cutoff(col):
-    if MAX_DAYS <= 0: return False
     d = col_to_date.get(col, "")
     if not d: return False
+    if DATE_END_DT and date_str_to_dt(d) >= DATE_END_DT:
+        return True
+    if MAX_DAYS <= 0: return False
     return date_diff(d) > MAX_DAYS
 
 past_count = sum(1 for c in date_cols if is_past(c))
 date_cols = [c for c in date_cols if not is_past(c)]
 print(f"Skipped {past_count} past columns, {len(date_cols)} future columns remain")
 
-if MAX_DAYS > 0:
-    beyond_count = sum(1 for c in date_cols if is_beyond_cutoff(c))
+beyond_count = sum(1 for c in date_cols if is_beyond_cutoff(c))
+if beyond_count:
     date_cols = [c for c in date_cols if not is_beyond_cutoff(c)]
-    print(f"Skipped {beyond_count} beyond-cutoff columns (--max-days={MAX_DAYS}), {len(date_cols)} columns remain")
+    reason = f"date_end={DATE_END_STR}" if DATE_END_DT else f"--max-days={MAX_DAYS}"
+    print(f"Skipped {beyond_count} beyond-cutoff columns ({reason}), {len(date_cols)} columns remain")
 
 # Helper to get day of week for a date
 def get_dow_for_date(date_str):
@@ -300,11 +309,20 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
             candidates = avail_n[col]
 
         def score(p, _col=col):
-            base = running_counts.get(p, 0) * 3
+            total_shifts = sum(running_counts.values())
+            target_avg = total_shifts / max(len(people_data), 1) if people_data else 0
+
+            # Primary: balance absolute shift count
+            current_shifts = running_counts.get(p, 0)
+            deviation = current_shifts - target_avg
+            balance_score = deviation * 15  # positive = worse (above avg), negative = better (below avg)
+
             night_penalty = 5 if p in nights.values() else 0
+
             is_night_only = all(check_constraint(p, c, "morning", people_data) == False
                               for c in days)
             night_bonus = -3 if is_night_only else 0
+
             consec = consecutive_counts.get(p, 0)
             if consec >= CONSECUTIVE_NIGHT_LIMIT + 1:
                 consec_penalty = 100
@@ -312,15 +330,15 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
                 consec_penalty = 20
             else:
                 consec_penalty = 0
+
             # Check if assigning this person to tonight starves tomorrow's morning
             tomorrow_idx = days.index(_col) + 1
             starve_penalty = 0
             if tomorrow_idx < len(days):
                 tomorrow_col = days[tomorrow_idx]
-                # If tomorrow's morning is already filled, check Rule 2
                 tomorrow_existing_m = existing_m.get(tomorrow_col)
                 if tomorrow_existing_m and norm(tomorrow_existing_m) == norm(p):
-                    starve_penalty = 500  # Would create Rule 2 violation with existing morning
+                    starve_penalty = 500
                 else:
                     tomorrow_avail = [
                         p2 for p2 in people_data
@@ -328,19 +346,20 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
                         and p2 != p
                     ]
                     if len(tomorrow_avail) < 2:
-                        starve_penalty = 500  # Need 2+ candidates: one for morning, one for night
-            # Prefer people with fewer night shifts already assigned across all weeks
+                        starve_penalty = 500
+
             night_imbalance = night_counts.get(p, 0) * 3
-            # Min weighted shifts rule (effective from EFFECTIVE_DT)
+
+            # Secondary: 7-point weighted floor (HARD floor, not sliding scale vs average)
             min_penalty = 0
             col_date_str = col_to_date.get(_col, "")
-            if col_date_str and date_str_to_dt(col_date_str) >= EFFECTIVE_DT and weighted_counts:
+            if col_date_str and date_str_to_dt(col_date_str) >= EFFECTIVE_DT:
                 p_w = weighted_counts.get(p, 0)
-                all_w = [weighted_counts.get(pp, 0) for pp in people_data]
-                avg_w = sum(all_w) / max(len(all_w), 1) if all_w else 0
-                if p_w < avg_w:
-                    min_penalty = (avg_w - p_w) * 10
-            return base + night_penalty + night_bonus + consec_penalty + starve_penalty + night_imbalance - min_penalty
+                if p_w < MIN_SHIFTS_14:
+                    shortfall = MIN_SHIFTS_14 - p_w
+                    min_penalty = -shortfall * 20  # BIG boost to get them to the 7-point floor
+
+            return balance_score + night_penalty + night_bonus + consec_penalty + starve_penalty + night_imbalance + min_penalty
 
         if not candidates:
             print(f"  ⚠ No night candidates for {col_to_date.get(col, col)}, skipping")
@@ -391,28 +410,35 @@ def solve_week(week, people_data, running_counts, team_name="eval", prev_week_ni
             candidates = avail_m[col]
 
         def score_m(p):
-            base = running_counts.get(p, 0) * 3
+            total_shifts = sum(running_counts.values())
+            target_avg = total_shifts / max(len(people_data), 1) if people_data else 0
+
+            # Primary: balance absolute shift count
+            current_shifts = running_counts.get(p, 0)
+            deviation = current_shifts - target_avg
+            balance_score = deviation * 15
+
             dup = 5 if p in mornings.values() else 0
-            # Weekend rule: prefer people who haven't done weekend shifts
+
             weekend_penalty = 0
             if is_weekend(col):
                 for c in days:
                     if is_weekend(c) and (mornings.get(c) == p or nights.get(c) == p):
                         weekend_penalty += 3
-            # Heavy penalty for Rule 2 violation (night->morning)
+
             prev_night_penalty = 100 if p == prev_night_person else 0
-            # Prevent same-day double-booking (night+morning)
             same_day_night_penalty = 100 if p == same_day_night else 0
-            # Min weighted shifts rule (effective from EFFECTIVE_DT)
+
+            # Secondary: 7-point weighted floor (HARD floor, not sliding scale vs average)
             min_penalty = 0
             col_date_str = col_to_date.get(col, "")
-            if col_date_str and date_str_to_dt(col_date_str) >= EFFECTIVE_DT and weighted_counts:
+            if col_date_str and date_str_to_dt(col_date_str) >= EFFECTIVE_DT:
                 p_w = weighted_counts.get(p, 0)
-                all_w = [weighted_counts.get(pp, 0) for pp in people_data]
-                avg_w = sum(all_w) / max(len(all_w), 1) if all_w else 0
-                if p_w < avg_w:
-                    min_penalty = (avg_w - p_w) * 10
-            return base + dup + weekend_penalty + prev_night_penalty + same_day_night_penalty - min_penalty
+                if p_w < MIN_SHIFTS_14:
+                    shortfall = MIN_SHIFTS_14 - p_w
+                    min_penalty = -shortfall * 20  # BIG boost to get them to the 7-point floor
+
+            return balance_score + dup + weekend_penalty + prev_night_penalty + same_day_night_penalty + min_penalty
         
         if not candidates:
             print(f"  ⚠ No morning candidates for {col_to_date.get(col, col)}, skipping")
