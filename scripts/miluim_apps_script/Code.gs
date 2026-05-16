@@ -160,6 +160,51 @@ function getShifts(personName, startDate, endDate) {
   return results;
 }
 
+// ─── DEBUG ────────────────────────────────────────────────────────────────────
+function debugNadav() {
+  const ss = SpreadsheetApp.openById(ITIN_SHEET_ID);
+  const sheet = ss.getSheetByName(ITIN_SCHEDULE_TAB);
+  const numCols = 60;
+  const headerR = sheet.getRange(3, 2, 1, numCols).getValues()[0];
+  const t1s1 = sheet.getRange(4, 2, 1, numCols).getValues()[0];
+  const t1s2 = sheet.getRange(5, 2, 1, numCols).getValues()[0];
+  const t2s1 = sheet.getRange(8, 2, 1, numCols).getValues()[0];
+  const t2s2 = sheet.getRange(9, 2, 1, numCols).getValues()[0];
+  
+  const nName = norm("נדב רבינוביץ'");
+  
+  // Check ALL columns that have dates
+  for (let i = 0; i < 30; i++) {
+    const header = String(headerR[i]);
+    const m = header.match(/(\d{2})\/(\d{2})\/(\d{2})/);
+    if (!m) continue;
+    
+    const iso = ddmmyyToISO(m[1], m[2], m[3]);
+    const dateNum = dateToNum(iso);
+    const t1s1n = norm(t1s1[i] || '');
+    const t1s2n = norm(t1s2[i] || '');
+    const t2s1n = norm(t2s1[i] || '');
+    const t2s2n = norm(t2s2[i] || '');
+    
+    const t1s1match = t1s1n === nName;
+    const t1s2match = t1s2n === nName;
+    
+    if (t1s1match || t1s2match) {
+      Logger.log('COL %s | date=%s | dateNum=%s | t1s1=[%s] match=%s | t1s2=[%s] match=%s',
+        i, iso, dateNum, t1s1[i] || '(empty)', t1s1match, t1s2[i] || '(empty)', t1s2match);
+      Logger.log('  t1s1 CHARS: %s', (t1s1[i]||'').split('').map(function(c){return c.charCodeAt(0);}).join(','));
+      Logger.log('  nName CHARS: %s', nName.split('').map(function(c){return c.charCodeAt(0);}).join(','));
+    }
+  }
+  
+  // Now run getShifts and log results
+  const shifts = getShifts("נדב רבינוביץ'", "2026-05-10", "2026-05-23");
+  Logger.log('getShifts returned %s shifts:', shifts.length);
+  shifts.forEach(function(s) {
+    Logger.log('  %s %s %s', s.date, s.dayName, s.shiftType);
+  });
+}
+
 function emailItinerary(personName, startDateStr, endDateStr) {
   try {
     const shifts = getShifts(personName, startDateStr, endDateStr);
