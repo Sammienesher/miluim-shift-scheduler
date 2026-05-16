@@ -177,30 +177,19 @@ function debugNadav() {
   const ss = SpreadsheetApp.openById(ITIN_SHEET_ID);
   const sheet = ss.getSheetByName(ITIN_SCHEDULE_TAB);
   
-  // Read ONLY rows 3 (headers) and 4 (team1 morning)
-  const headerR = sheet.getRange(3, 2, 1, 30).getValues()[0];
-  const t1s1 = sheet.getRange(4, 2, 1, 30).getValues()[0];
-  const t1s2 = sheet.getRange(5, 2, 1, 30).getValues()[0];
+  // Read ALL 60 columns of headers
+  const headerR = sheet.getRange(3, 2, 1, 60).getValues()[0];
+  const t1s1 = sheet.getRange(4, 2, 1, 60).getValues()[0];
   
-  const nName = norm("נדב רבינוביץ'");
-  
-  // Print cols 0 through 12 — uses headerToISO for Date object support
-  for (let i = 0; i <= 12; i++) {
+  Logger.log('=== ALL 60 COLUMN DATES IN SHEET ===');
+  for (let i = 0; i < 60; i++) {
     const iso = headerToISO(headerR[i]);
-    if (!iso) {
-      Logger.log('COL %s: header=[%s] NO DATE', i, String(headerR[i] || ''));
-      continue;
+    if (iso && iso.startsWith('2026-05')) {
+      Logger.log('COL %s (col %s): date=%s, t1s1=[%s]', i, i+2, iso, String(t1s1[i]||''));
     }
-    const t1s1val = t1s1[i] || '(EMPTY)';
-    const t1s1norm = norm(t1s1[i] || '');
-    const match = t1s1norm === nName;
-    
-    Logger.log('COL %s date=%s | t1s1=[%s] norm=[%s] match=%s', i, iso, t1s1val, t1s1norm, match);
-    Logger.log('  t1s1 codes: %s', (t1s1[i]||'').split('').map(function(c){return c.charCodeAt(0);}).join(','));
-    Logger.log('  nName codes: %s', nName.split('').map(function(c){return c.charCodeAt(0);}).join(','));
   }
   
-  // Now run getShifts
+  Logger.log('=== getShifts for 2026-05-10 to 2026-05-23 ===');
   const shifts = getShifts("נדב רבינוביץ'", "2026-05-10", "2026-05-23");
   Logger.log('getShifts returned %s shifts:', shifts.length);
   shifts.forEach(function(s) {
