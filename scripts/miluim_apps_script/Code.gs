@@ -146,7 +146,7 @@ function getShifts(personName, startDate, endDate) {
   const sheet = ss.getSheetByName(ITIN_SCHEDULE_TAB);
   const nName = norm(personName);
   const numCols = 60;
-  const headerR = sheet.getRange(3, 2, 1, numCols).getValues()[0];
+  const headerR = sheet.getRange(3, 2, 1, numCols).getDisplayValues()[0];
   const t1s1 = sheet.getRange(4, 2, 1, numCols).getValues()[0];
   const t1s2 = sheet.getRange(5, 2, 1, numCols).getValues()[0];
   const t2s1 = sheet.getRange(8, 2, 1, numCols).getValues()[0];
@@ -177,19 +177,22 @@ function debugNadav() {
   const ss = SpreadsheetApp.openById(ITIN_SHEET_ID);
   const sheet = ss.getSheetByName(ITIN_SCHEDULE_TAB);
   
-  // Read ALL 60 columns of headers
-  const headerR = sheet.getRange(3, 2, 1, 60).getValues()[0];
+  // Read ALL 60 columns using DISPLAY values (strings like "Monday, 10/05/26")
+  const headerR = sheet.getRange(3, 2, 1, 60).getDisplayValues()[0];
   const t1s1 = sheet.getRange(4, 2, 1, 60).getValues()[0];
+  const t1s2 = sheet.getRange(5, 2, 1, 60).getValues()[0];
   
-  Logger.log('=== ALL 60 COLUMN DATES IN SHEET ===');
+  Logger.log('=== ALL DATES IN MAY 2026 RANGE ===');
   for (let i = 0; i < 60; i++) {
     const iso = headerToISO(headerR[i]);
-    if (iso && iso.startsWith('2026-05')) {
-      Logger.log('COL %s (col %s): date=%s, t1s1=[%s]', i, i+2, iso, String(t1s1[i]||''));
+    if (iso && iso.startsWith('2026-05') && iso >= '2026-05-10' && iso <= '2026-05-23') {
+      const norm1 = norm(t1s1[i] || '');
+      const norm2 = norm(t1s2[i] || '');
+      Logger.log('COL %s: %s | morning=[%s] night=[%s]', i, iso, norm1, norm2);
     }
   }
   
-  Logger.log('=== getShifts for 2026-05-10 to 2026-05-23 ===');
+  Logger.log('=== getShifts for Nadav 2026-05-10 to 2026-05-23 ===');
   const shifts = getShifts("נדב רבינוביץ'", "2026-05-10", "2026-05-23");
   Logger.log('getShifts returned %s shifts:', shifts.length);
   shifts.forEach(function(s) {
@@ -257,7 +260,7 @@ function getMyShiftsWithTeam(personName) {
   const normName = norm(personName);
   const numCols = 60;
 
-  const headers = sheet.getRange(3, 2, 1, numCols).getValues()[0];
+  const headers = sheet.getRange(3, 2, 1, numCols).getDisplayValues()[0];
   const t1m = sheet.getRange(4, 2, 1, numCols).getValues()[0];
   const t1n = sheet.getRange(5, 2, 1, numCols).getValues()[0];
   const t2m = sheet.getRange(8, 2, 1, numCols).getValues()[0];
