@@ -109,6 +109,12 @@ function ddmmyyToISO(dd, mm, yy) {
   return (2000+parseInt(yy)) + '-' + pad2(parseInt(mm)) + '-' + pad2(parseInt(dd));
 }
 
+// Convert YYYY-MM-DD to integer YYYYMMDD for timezone-proof comparison
+function dateToNum(s) {
+  const p = s.split('-');
+  return parseInt(p[0])*10000 + parseInt(p[1])*100 + parseInt(p[2]);
+}
+
 function getPeople() {
   const ss = SpreadsheetApp.openById(ITIN_SHEET_ID);
   const sheet = ss.getSheetByName(ITIN_GROUPS_TAB);
@@ -134,11 +140,6 @@ function getShifts(personName, startDate, endDate) {
   const t2s1 = sheet.getRange(8, 2, 1, numCols).getValues()[0];
   const t2s2 = sheet.getRange(9, 2, 1, numCols).getValues()[0];
   const results = [];
-  // Convert to numeric YYYYMMDD for timezone-proof comparison
-  function dateToNum(s) {
-    const p = s.split('-');
-    return parseInt(p[0])*10000 + parseInt(p[1])*100 + parseInt(p[2]);
-  }
   const startNum = dateToNum(startDate);
   const endNum   = dateToNum(endDate);
   for (let i = 0; i < numCols; i++) {
