@@ -174,7 +174,7 @@ function debugNadav() {
   
   const nName = norm("נדב רבינוביץ'");
   
-  // Check ALL columns that have dates
+  // Check ALL columns that have dates - print everything in range
   for (let i = 0; i < 30; i++) {
     const header = String(headerR[i]);
     const m = header.match(/(\d{2})\/(\d{2})\/(\d{2})/);
@@ -184,17 +184,19 @@ function debugNadav() {
     const dateNum = dateToNum(iso);
     const t1s1n = norm(t1s1[i] || '');
     const t1s2n = norm(t1s2[i] || '');
-    const t2s1n = norm(t2s1[i] || '');
-    const t2s2n = norm(t2s2[i] || '');
     
     const t1s1match = t1s1n === nName;
     const t1s2match = t1s2n === nName;
     
-    if (t1s1match || t1s2match) {
-      Logger.log('COL %s | date=%s | dateNum=%s | t1s1=[%s] match=%s | t1s2=[%s] match=%s',
-        i, iso, dateNum, t1s1[i] || '(empty)', t1s1match, t1s2[i] || '(empty)', t1s2match);
-      Logger.log('  t1s1 CHARS: %s', (t1s1[i]||'').split('').map(function(c){return c.charCodeAt(0);}).join(','));
-      Logger.log('  nName CHARS: %s', nName.split('').map(function(c){return c.charCodeAt(0);}).join(','));
+    Logger.log('COL %s date=%s t1s1=[%s] match=%s | t1s2=[%s] match=%s',
+      i, iso,
+      t1s1[i] || '(empty)', t1s1match,
+      t1s2[i] || '(empty)', t1s2match);
+    if (t1s1[i]) {
+      Logger.log('  t1s1 CHARS: %s', (t1s1[i]).split('').map(function(c){return c.charCodeAt(0);}).join(','));
+    }
+    if (t1s2[i]) {
+      Logger.log('  t1s2 CHARS: %s', (t1s2[i]).split('').map(function(c){return c.charCodeAt(0);}).join(','));
     }
   }
   
