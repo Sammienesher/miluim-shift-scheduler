@@ -12,12 +12,110 @@ const SHIFT_2_END   = '06:00';
 // ─── Menu ────────────────────────────────────────────────────────────────────
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu('שליח/י')
-    .addItem('לוח משמרות אישי', 'showSidebar')
+    .createMenu('משמרות')
+    .addItem('לוח אישי', 'showSidebar')
+    .addItem('החלפת משמרת', 'showSwapSidebar')
     .addToUi();
 }
 
-// ─── Sidebar ─────────────────────────────────────────────────────────────────
+// ─── Swap Sidebar ─────────────────────────────────────────────────────────────
+function showSwapSidebar() {
+  const html = HtmlService.createHtmlOutputFromFile('SwapSidebar')
+    .setTitle('החלפת משמרת')
+    .setWidth(380);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+// Get all shifts with team info for a person (used by swap sidebar)
+function getMyShiftsWithTeam(personName) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SCHEDULE_TAB);
+  const normName = norm(personName);
+  const numCols = 60;
+  
+  // R3=headers, R4=team1 morn, R5=team1 night, R8=team2 morn, R9=team2 night
+  const headers  = sheet.getRange(3, 2, 1, numCols).getValues()[0];
+  const t1m = sheet.getRange(4, 2, 1, numCols).getValues()[0];
+  const t1n = sheet.getRange(5, 2, 1, numCols).getValues()[0];
+  const t2m = sheet.getRange(8, 2, 1, numCols).getValues()[0];
+  const t2n = sheet.getRange(9, 2, 1, numCols).getValues()[0];
+  
+  const dateRegex = /(\d{2})\/(\d{2})\/(\d{2})/;
+  const results = [];
+  
+  const configs = [
+    { row: t1m, team: 'הערכה', type: 'בוקר' },
+    { row: t1n, team: 'הערכה', type: 'לילה' },
+    { row: t2m, team: 'עיבוד', type: 'בוקר' },
+    { row: t2n, team: 'עיבוד', type: 'לילה' },
+  ];
+  
+  for (let i = 0; i < numCols; i++) {
+    const header = String(headers[i] || '');
+    const match = header.match(dateRegex);
+    if (!match) continue;
+    
+    const dateStr = match[1] + '/' + match[2] + '/20' + match[3];
+    const isoDate = ddmmyyToISO(match[1], match[2], match[3]);
+    
+    // Only future dates
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const shiftDate = new Date(isoDate + 'T12:00:00');
+    if (shiftDate < today) continue;
+    
+    for (const cfg of configs) {
+      if (norm(cfg.row[i]) === normName) {
+        results.push({
+          date: isoDate,
+          dateStr: dateStr,
+          dayName: getDayNameHebrew(shiftDate),
+          shiftType: cfg.type,
+          team: cfg.team,
+        });
+      }
+    }
+  }
+  
+  results.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  return results;
+}
+
+// Get all people's names for the dropdown
+function getPeopleNames() {
+  const people = getPeople();
+  return people.map(p => p.name);
+}
+
+// Submit a swap request to the staging area
+function submitSwapRequest(personName, shiftDate, shiftType, team) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let swapSheet = ss.getSheetByName('Swaps');
+    if (!swapSheet) {
+      swapSheet = ss.insertSheet('Swaps');
+      swapSheet.getRange(1, 1, 1, 7).setValues([[
+        'תאריך בקשה', 'שם', 'תאריך משמרת', 'סוג', 'צוות', 'סטטוס', 'תוצאה'
+      ]]);
+      swapSheet.setFrozenRows(1);
+    }
+    
+    // Find next empty row
+    const lastRow = swapSheet.getLastRow() + 1;
+    const now = new Date();
+    const timestamp = Utilities.formatDate(now, 'Asia/Jerusalem', 'dd/MM/yy HH:mm');
+    
+    swapSheet.getRange(lastRow, 1, 1, 6).setValues([[
+      timestamp, personName, shiftDate, shiftType, team, 'ממתין'
+    ]]);
+    
+    return { success: true, row: lastRow };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+// ─── Personal Itinerary Sidebar ──────────────────────────────────────────────
 function showSidebar() {
   const html = HtmlService.createHtmlOutputFromFile('Sidebar')
     .setTitle('לוח משמרות אישי')

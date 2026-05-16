@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: 'Google Sans', Arial, sans-serif;
+      padding: 16px;
+      direction: rtl;
+      color: #202124;
+      margin: 0;
+      font-size: 14px;
+    }
+    h2 {
+      font-size: 18px;
+      margin-top: 0;
+      margin-bottom: 16px;
+      color: #202124;
+      font-weight: 500;
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-weight: 500;
+      font-size: 13px;
+      color: #5f6368;
+    }
+    select, button {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-bottom: 14px;
+      box-sizing: border-box;
+      background: white;
+    }
+    select {
+      cursor: pointer;
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12'><path d='M2 4l4 4 4-4' fill='none' stroke='%235f6368' stroke-width='2'/></svg>");
+      background-repeat: no-repeat;
+      background-position: left 12px center;
+      padding-left: 28px;
+    }
+    select:focus {
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 2px rgba(26,115,232,0.2);
+    }
+    button {
+      background: #1a73e8;
+      color: white;
+      border: none;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+      padding: 12px;
+    }
+    button:hover { background: #1765cc; }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      display: none;
+    }
+    .status.info {
+      display: block;
+      background: #e8f0fe;
+      color: #1a73e8;
+    }
+    .status.success {
+      display: block;
+      background: #e6f4ea;
+      color: #137333;
+    }
+    .status.error {
+      display: block;
+      background: #fce8e6;
+      color: #c5221f;
+    }
+    .shift-card {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: border-color 0.2s;
+    }
+    .shift-card:hover { border-color: #dadce0; }
+    .shift-card.selected { border-color: #1a73e8; background: #e8f0fe; }
+    .shift-card .date { font-weight: 500; }
+    .shift-card .detail { font-size: 12px; color: #5f6368; margin-top: 2px; }
+    .shift-list { max-height: 320px; overflow-y: auto; margin-bottom: 14px; }
+    .hint {
+      font-size: 12px;
+      color: #5f6368;
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <h2>🔄 החלפת משמרת</h2>
+  <p class="hint">בחר את שמך ואת המשמרת שאתה רוצה להחליף. אמצא מישהו שיכול לקחת אותה במקומך, ויתן לך משמרת אחרת בתמורה.</p>
+
+  <label for="nameSelect">שם</label>
+  <select id="nameSelect" onchange="loadShifts()">
+    <option value="">טוען שמות...</option>
+  </select>
+
+  <label for="shiftSelect">המשמרת שברצונך להחליף</label>
+  <div id="shiftList" class="shift-list">
+    <div style="color: #5f6368; font-size: 13px; padding: 8px 0;">יש לבחור שם תחילה</div>
+  </div>
+  <select id="shiftSelect" style="display:none;"></select>
+
+  <button id="swapBtn" onclick="submitRequest()" disabled>בקש החלפה</button>
+
+  <div id="status" class="status"></div>
+
+<script>
+  let allShifts = [];
+  let selectedIdx = -1;
+
+  // Load names
+  google.script.run
+    .withSuccessHandler(function(names) {
+      const sel = document.getElementById('nameSelect');
+      sel.innerHTML = '<option value="">בחר שם...</option>' +
+        names.map(function(n) { return '<option value="' + n.replace(/'/g, "\\'") + '">' + n + '</option>'; }).join('');
+    })
+    .withFailureHandler(function(err) { showStatus('שגיאה בטעינת שמות: ' + err, 'error'); })
+    .getPeopleNames();
+
+  function loadShifts() {
+    const name = document.getElementById('nameSelect').value;
+    const list = document.getElementById('shiftList');
+    const btn = document.getElementById('swapBtn');
+    selectedIdx = -1;
+    btn.disabled = true;
+
+    if (!name) {
+      list.innerHTML = '<div style="color: #5f6368; font-size: 13px; padding: 8px 0;">יש לבחור שם תחילה</div>';
+      return;
+    }
+
+    list.innerHTML = '<div style="color: #5f6368; font-size: 13px; padding: 8px 0;">טוען משמרות...</div>';
+    google.script.run
+      .withSuccessHandler(function(shifts) {
+        allShifts = shifts;
+        if (shifts.length === 0) {
+          list.innerHTML = '<div style="color: #5f6368; font-size: 13px; padding: 8px 0;">אין משמרות עתידיות להחלפה</div>';
+          return;
+        }
+        list.innerHTML = shifts.map(function(s, idx) {
+          const teamLabel = s.team === 'הערכה' ? 'הערכה' : 'עיבוד';
+          const typeLabel = s.shiftType === 'בוקר' ? '🌅 בוקר' : '🌙 לילה';
+          return '<div class="shift-card" id="sc' + idx + '" onclick="selectShift(' + idx + ')">' +
+            '<div class="date">' + s.dayName + ' ' + s.dateStr + '</div>' +
+            '<div class="detail">' + typeLabel + ' – ' + teamLabel + '</div>' +
+            '</div>';
+        }).join('');
+      })
+      .withFailureHandler(function(err) { showStatus('שגיאה: ' + err, 'error'); })
+      .getMyShiftsWithTeam(name);
+  }
+
+  function selectShift(idx) {
+    selectedIdx = idx;
+    document.querySelectorAll('.shift-card').forEach(function(el, i) {
+      el.classList.toggle('selected', i === idx);
+    });
+    document.getElementById('swapBtn').disabled = false;
+  }
+
+  function submitRequest() {
+    if (selectedIdx < 0) return;
+    const shift = allShifts[selectedIdx];
+    const name = document.getElementById('nameSelect').value;
+    const btn = document.getElementById('swapBtn');
+    btn.disabled = true;
+    btn.textContent = 'שולח בקשה...';
+
+    // Submit to Swaps staging sheet
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (result.success) {
+          showStatus('✅ הבקשה נשלחה! אבדוק הצעות החלפה ואחזור אליך.', 'success');
+          btn.textContent = '✅ נשלח';
+        } else {
+          showStatus('שגיאה בשליחת הבקשה: ' + result.error, 'error');
+          btn.disabled = false;
+          btn.textContent = 'בקש החלפה';
+        }
+      })
+      .withFailureHandler(function(err) {
+        showStatus('שגיאה: ' + err, 'error');
+        btn.disabled = false;
+        btn.textContent = 'בקש החלפה';
+      })
+      .submitSwapRequest(name, shift.dateStr, shift.shiftType, shift.team);
+
+    // Also open a draft message telling user to ping me
+    setTimeout(function() {
+      btn.textContent = '✅ נשלח';
+    }, 1000);
+  }
+
+  function showStatus(msg, type) {
+    const el = document.getElementById('status');
+    el.className = 'status ' + type;
+    el.textContent = msg;
+  }
+</script>
+</body>
+</html>
